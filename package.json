@@ -1,0 +1,26 @@
+{
+  "name": "scribe",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Generates evidence-grounded onboarding docs for a repository and keeps them current.",
+  "type": "module",
+  "bin": {
+    "scribe": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
