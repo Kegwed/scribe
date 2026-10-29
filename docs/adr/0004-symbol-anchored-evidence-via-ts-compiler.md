@@ -1,0 +1,3 @@
+# Code Evidence is anchored to symbols, using the TypeScript compiler API
+
+Code Evidence points at symbols (e.g. `createSession` in `auth/session.ts`) and is hashed by that symbol's text, not by line range or whole file, so unrelated edits like an added import don't make Sections Stale. Rendered citations are still SHA-pinned permalinks with the line range current at write time. Resolving symbols and references requires real semantic analysis, so v1 uses the TypeScript compiler API (via ts-morph) rather than tree-sitter, behind a per-language interface; v1 supports TypeScript/JavaScript Target repos only.
