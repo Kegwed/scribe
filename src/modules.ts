@@ -39,8 +39,8 @@ function sourceDirectoryModules(repoDir: string): Module[] {
 }
 
 async function readWorkspacePatterns(repoDir: string): Promise<string[] | undefined> {
-  const manifest = await readJson(join(repoDir, "package.json"));
-  const workspaces = manifest?.workspaces;
+  const packageJson = await readJson(join(repoDir, "package.json"));
+  const workspaces = packageJson?.workspaces;
   if (Array.isArray(workspaces)) return workspaces;
   if (Array.isArray(workspaces?.packages)) return workspaces.packages;
 
@@ -66,13 +66,19 @@ function parsePnpmPackages(yaml: string): string[] {
 }
 
 async function workspaceModules(repoDir: string, patterns: string[]): Promise<Module[]> {
+  const include = patterns.filter((p) => !p.startsWith("!"));
+  const exclude = [
+    ...patterns.filter((p) => p.startsWith("!")).map((p) => p.slice(1)),
+    "**/node_modules",
+  ];
+
   const modules: Module[] = [];
-  for await (const path of glob(patterns, { cwd: repoDir })) {
-    const manifest = await readJson(join(repoDir, path, "package.json"));
-    if (!manifest) continue;
-    modules.push({ name: manifest.name ?? path, path: path.replaceAll("\\", "/") });
+  for await (const path of glob(include, { cwd: repoDir, exclude })) {
+    const packageJson = await readJson(join(repoDir, path, "package.json"));
+    if (!packageJson) continue;
+    modules.push({ name: packageJson.name ?? path, path: path.replaceAll("\\", "/") });
   }
-  return modules.sort((a, b) => a.path.localeCompare(b.path));
+  return modules.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
 async function readJson(file: string): Promise<any> {

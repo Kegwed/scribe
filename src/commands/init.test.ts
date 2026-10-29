@@ -30,6 +30,20 @@ describe("init", () => {
     ]);
   });
 
+  it("honours negated workspace patterns and never treats dependencies as Modules", async () => {
+    const repo = createFixtureRepo({
+      "package.json": pkg("root", { private: true, workspaces: ["packages/**", "!packages/private"] }),
+      ".gitignore": "node_modules/\n",
+      "packages/core/package.json": pkg("@acme/core"),
+      "packages/core/node_modules/dep/package.json": pkg("dep"),
+      "packages/private/package.json": pkg("@acme/private"),
+    });
+
+    const result = await init(repo.dir);
+
+    expect(result.modules).toEqual([{ name: "@acme/core", path: "packages/core" }]);
+  });
+
   it("reads pnpm workspaces from pnpm-workspace.yaml", async () => {
     const repo = createFixtureRepo({
       "package.json": pkg("root", { private: true }),
