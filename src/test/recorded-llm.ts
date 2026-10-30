@@ -53,13 +53,13 @@ export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown>
     calls,
     async complete(request) {
       calls.push(request);
-      if (request.model === MODELS.write) return text(writes[Math.min(written++, writes.length - 1)]);
+      if (request.model === MODELS.write) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
       const claim = Object.keys(verdicts).find((key) => request.prompt.includes(key));
-      return text(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);
+      return asResponseText(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);
     },
   };
 }
 
-function text(response: unknown): string {
+function asResponseText(response: unknown): string {
   return typeof response === "string" ? response : JSON.stringify(response);
 }

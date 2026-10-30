@@ -55,25 +55,17 @@ export async function generate(
     }
 
     const evidence = new Map(symbols.filter((s) => s.module === module.path).map((s) => [s.id, s]));
-    let draft: SectionResponse = evidence.size === 0
+    const writeSection = (prompt: string) =>
+      completeCached(llm, repoDir, { model: MODELS.write, system: SECTION_SYSTEM, prompt, schema: SECTION_SCHEMA }, parseSection);
+    let written: SectionResponse = evidence.size === 0
       ? { paragraphs: [] }
-      : await completeCached(llm, repoDir, {
-          model: MODELS.write,
-          system: SECTION_SYSTEM,
-          prompt: sectionPrompt(module, [...evidence.values()]),
-          schema: SECTION_SCHEMA,
-        }, parseSection);
-    let failures = await verifySection(llm, repoDir, draft, evidence);
+      : await writeSection(sectionPrompt(module, [...evidence.values()]));
+    let failures = await verifySection(llm, repoDir, written, evidence);
     if (failures.size > 0) {
-      draft = await completeCached(llm, repoDir, {
-        model: MODELS.write,
-        system: SECTION_SYSTEM,
-        prompt: repairPrompt(module, [...evidence.values()], draft, failures),
-        schema: SECTION_SCHEMA,
-      }, parseSection);
-      failures = await verifySection(llm, repoDir, draft, evidence);
+      written = await writeSection(repairPrompt(module, [...evidence.values()], written, failures));
+      failures = await verifySection(llm, repoDir, written, evidence);
     }
-    const { paragraphs } = draft;
+    const { paragraphs } = written;
 
     const cited = new Map<string, CodeSymbol>();
     const body: string[] = [];
@@ -190,21 +182,24 @@ async function verifySection(
   { paragraphs }: SectionResponse,
   evidence: Map<string, CodeSymbol>,
 ): Promise<Map<Claim, string>> {
-  const failures = new Map<Claim, string>();
-  await Promise.all(paragraphs.flatMap((p) => p.claims).map(async (claim) => {
+  const claims = paragraphs.flatMap((p) => p.claims);
+  const reasons = await Promise.all(claims.map(async (claim) => {
     const cited = [...new Set(claim.evidence)].flatMap((id) => evidence.get(id) ?? []);
-    if (cited.length === 0) {
-      failures.set(claim, "cites no Evidence from this Module");
-      return;
-    }
+    if (cited.length === 0) return "cites no Evidence from this Module";
     const { confirmed, reason } = await completeCached(llm, repoDir, {
       model: MODELS.verify,
       system: VERIFY_SYSTEM,
       prompt: verifyPrompt(claim, cited),
       schema: VERDICT_SCHEMA,
     }, parseVerdict);
-    if (!confirmed) failures.set(claim, reason);
+    return confirmed ? undefined : reason;
   }));
+  // In Claim order, not answer order: the repair prompt lists these, and that prompt is a cache key.
+  const failures = new Map<Claim, string>();
+  claims.forEach((claim, i) => {
+    const reason = reasons[i];
+    if (reason !== undefined) failures.set(claim, reason);
+  });
   return failures;
 }
 
@@ -262,13 +257,13 @@ function sectionPrompt(module: Module, symbols: CodeSymbol[]): string {
   return [`Module: ${module.name} (${module.path})`, ...symbols.map(renderSymbol)].join("\n\n");
 }
 
-function repairPrompt(module: Module, symbols: CodeSymbol[], draft: SectionResponse, failures: Map<Claim, string>): string {
+function repairPrompt(module: Module, symbols: CodeSymbol[], failed: SectionResponse, failures: Map<Claim, string>): string {
   const feedback = [...failures].map(([claim, reason]) => `<failure>\n<claim>${claim.text}</claim>\n<reason>${reason}</reason>\n</failure>`);
   return [
     sectionPrompt(module, symbols),
-    `<draft>\n${JSON.stringify(draft)}\n</draft>`,
+    `<section>\n${JSON.stringify(failed)}\n</section>`,
     ...feedback,
-    "The draft above failed verification on the listed Claims. Write the Section again: keep every other Claim as it is, and correct each listed Claim so the symbols it cites back it, or leave it out.",
+    "The Section above failed verification on the listed Claims. Write the Section again: keep every other Claim as it is, and correct each listed Claim so the symbols it cites back it. Do not leave out any Claim: one that can't be corrected is removed and reported after this.",
   ].join("\n\n");
 }
 

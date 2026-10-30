@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
-import { MODELS } from "../llm.ts";
+import { type Llm, MODELS } from "../llm.ts";
 import { recordedLlm, type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { generate } from "./generate.ts";
 
@@ -25,6 +25,10 @@ const TARGET: Files = {
 
 function read(dir: string, path: string): string {
   return readFileSync(join(dir, path), "utf8");
+}
+
+function writes(llm: RecordedLlm) {
+  return llm.calls.filter((call) => call.model === MODELS.write);
 }
 
 describe("generate", () => {
@@ -138,7 +142,7 @@ describe("generate", () => {
     const llm = recordedLlm("generate");
     await generate(repo.dir, {}, { llm });
 
-    expect(llm.calls.filter((call) => call.model === MODELS.write).length).toBeGreaterThanOrEqual(2);
+    expect(writes(llm).length).toBeGreaterThanOrEqual(2);
   });
 
   it("never caches a response whose Claims are malformed", async () => {
@@ -148,7 +152,7 @@ describe("generate", () => {
     const llm = recordedLlm("generate");
     await generate(repo.dir, {}, { llm });
 
-    expect(llm.calls.filter((call) => call.model === MODELS.write).length).toBeGreaterThanOrEqual(2);
+    expect(writes(llm).length).toBeGreaterThanOrEqual(2);
   });
 
   it("git-ignores the cache even when the config was written by hand", async () => {
@@ -264,7 +268,6 @@ describe("generate", () => {
     const section = (...texts: string[]) => ({
       paragraphs: [{ claims: texts.map((text) => ({ text, evidence: CITED })) }],
     });
-    const writes = (llm: RecordedLlm) => llm.calls.filter((call) => call.model === MODELS.write);
 
     it("writes a Section whose Claims all verify unchanged, checking each with the verifier", async () => {
       const repo = createFixtureRepo(ONE_MODULE);
@@ -288,6 +291,25 @@ describe("generate", () => {
 
       expect(writes(llm)).toHaveLength(2);
       expect(writes(llm)[1]!.prompt).toContain("a is not a function");
+    });
+
+    it("gives the repair its feedback in Claim order, however the verifier's answers arrive", async () => {
+      const repo = createFixtureRepo(ONE_MODULE);
+      const scripted = scriptedLlm(section("First.", "Second."), {
+        "First.": { confirmed: false, reason: "reason one" },
+        "Second.": { confirmed: false, reason: "reason two" },
+      });
+      const llm: Llm = {
+        async complete(request) {
+          if (request.model === MODELS.verify && request.prompt.includes("First.")) await new Promise((r) => setTimeout(r, 50));
+          return scripted.complete(request);
+        },
+      };
+
+      await generate(repo.dir, {}, { llm });
+
+      const { prompt } = writes(scripted)[1]!;
+      expect(prompt.indexOf("reason one")).toBeLessThan(prompt.indexOf("reason two"));
     });
 
     it("writes the repaired Section when the repair verifies", async () => {
