@@ -137,6 +137,37 @@ describe("generate", () => {
     expect(llm.calls).toHaveLength(2);
   });
 
+  it("never caches a response whose Claims are malformed", async () => {
+    const repo = createFixtureRepo(TARGET);
+    await expect(generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{}] }) })).rejects.toThrow(/malformed/);
+
+    const llm = recordedLlm("generate");
+    await generate(repo.dir, {}, { llm });
+
+    expect(llm.calls).toHaveLength(2);
+  });
+
+  it("git-ignores the cache even when the config was written by hand", async () => {
+    const repo = createFixtureRepo(TARGET);
+
+    await generate(repo.dir, {}, { llm: recordedLlm("generate") });
+
+    expect(repo.git("status", "--porcelain", "--untracked-files=all")).not.toContain(".scribe/cache/");
+  });
+
+  it("leaves a Section as it is when only HEAD has moved since it was written", async () => {
+    const repo = createFixtureRepo(TARGET);
+    repo.git("remote", "add", "origin", "git@github.com:acme/app.git");
+    await generate(repo.dir, {}, { llm: recordedLlm("generate") });
+    const before = read(repo.dir, "docs/guide/modules/src-auth.md");
+    repo.commit({}, "commit the Guide");
+
+    await generate(repo.dir, {}, { llm: recordedLlm("generate") });
+
+    expect(read(repo.dir, "docs/guide/modules/src-auth.md")).toBe(before);
+    expect(repo.git("status", "--porcelain", "--", "docs/guide")).toBe("");
+  });
+
   it("drops Claims that cite nothing, or nothing in the Module, and reports them", async () => {
     const repo = createFixtureRepo({ "scribe.config.json": "{}", "src/a/a.ts": "export const a = 1;\n", "src/b/b.ts": "export const b = 1;\n" });
     const llm = scriptedLlm({

@@ -7,8 +7,9 @@ import { type CodeSymbol, typescriptAnalyser } from "../analyser.ts";
 import { CONFIG_FILE, loadConfig } from "../config.ts";
 import { contentHash } from "../hash.ts";
 import { completeCached, MODELS } from "../llm.ts";
-import { loadManifest, saveManifest } from "../manifest.ts";
+import { CACHE_DIR, loadManifest, saveManifest } from "../manifest.ts";
 import { detectModules, type Module } from "../modules.ts";
+import { gitIgnore } from "./init.ts";
 
 export interface GenerateOptions {}
 
@@ -33,6 +34,7 @@ export async function generate(
 ): Promise<GenerateResult> {
   const config = await loadConfig(repoDir);
   if (!config) throw new Error(`no ${CONFIG_FILE} here; run scribe init first`);
+  await gitIgnore(repoDir, CACHE_DIR);
 
   const modules = config.modules ?? (await detectModules(repoDir));
   const sectionIds = uniqueSectionIds(modules);
@@ -45,7 +47,9 @@ export async function generate(
     const section = sectionIds.get(module)!;
     const path = `${config.guideDir}/${section}.md`;
     const file = join(repoDir, path);
-    if (existsSync(file) && contentHash(await readFile(file, "utf8")) !== manifest.sections[section]?.contentHash) {
+    const existing = existsSync(file) ? await readFile(file, "utf8") : undefined;
+    const record = manifest.sections[section];
+    if (existing !== undefined && contentHash(existing) !== record?.contentHash) {
       result.frozen.push(section);
       continue;
     }
@@ -80,13 +84,22 @@ export async function generate(
     const citedSymbols = [...cited.values()];
     const footnotes = citedSymbols.map((symbol, i) => `[^${i + 1}]: ${citation(symbol, permalinks)}`);
     const content = [`# ${module.name}`, ...body, ...(footnotes.length > 0 ? [footnotes.join("\n")] : [])].join("\n\n") + "\n";
+    const evidenceRecords = citedSymbols.map(({ id, hash }) => ({ id, hash }));
+    // Unchanged but for where its links pin: the old pins still point at this same text, so rewriting would only churn.
+    if (
+      existing !== undefined &&
+      withoutPins(existing) === withoutPins(content) &&
+      JSON.stringify(record?.evidence) === JSON.stringify(evidenceRecords)
+    ) {
+      continue;
+    }
     if (permalinks) result.warnings.push(...uncommittedWarnings(repoDir, section, citedSymbols));
 
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, content);
     manifest.sections[section] = {
       file: path,
-      evidence: citedSymbols.map(({ id, hash }) => ({ id, hash })),
+      evidence: evidenceRecords,
       contentHash: contentHash(content),
     };
     // Saved per Section: a file written but unrecorded would read as Frozen on the next run.
@@ -128,6 +141,10 @@ function citation(symbol: CodeSymbol, permalinks: Permalinks | undefined): strin
   return permalinks ? `[${label}](${permalinks(symbol)})` : label;
 }
 
+function withoutPins(content: string): string {
+  return content.replace(/\r\n?/g, "\n").replace(/\]\(https:\/\/github\.com\/.*\)$/gm, "]");
+}
+
 /** A permalink pins HEAD, so its line range is wrong if the cited file has uncommitted changes. */
 function uncommittedWarnings(repoDir: string, section: string, symbols: CodeSymbol[]): string[] {
   const files = [...new Set(symbols.map((s) => s.file))];
@@ -144,7 +161,7 @@ function git(repoDir: string, ...args: string[]): string | undefined {
   return status === 0 ? stdout.trim() : undefined;
 }
 
-interface SectionDraft {
+interface SectionResponse {
   paragraphs: { claims: { text: string; evidence: string[] }[] }[];
 }
 
@@ -189,8 +206,16 @@ function sectionPrompt(module: Module, symbols: CodeSymbol[]): string {
   return [`Module: ${module.name} (${module.path})`, ...rendered].join("\n\n");
 }
 
-function parseSection(response: string): SectionDraft {
-  const draft = JSON.parse(response);
-  if (!Array.isArray(draft?.paragraphs)) throw new Error(`malformed Section response: ${response}`);
-  return draft;
+function parseSection(response: string): SectionResponse {
+  const parsed = JSON.parse(response);
+  const wellFormed =
+    Array.isArray(parsed?.paragraphs) &&
+    parsed.paragraphs.every((p: any) =>
+      Array.isArray(p?.claims) &&
+      p.claims.every((c: any) =>
+        typeof c?.text === "string" && Array.isArray(c?.evidence) && c.evidence.every((id: any) => typeof id === "string"),
+      ),
+    );
+  if (!wellFormed) throw new Error(`malformed Section response: ${response}`);
+  return parsed;
 }

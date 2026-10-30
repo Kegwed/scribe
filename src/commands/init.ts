@@ -56,7 +56,7 @@ async function writeJson(file: string, value: unknown): Promise<void> {
 }
 
 /** Appends `dir` to the repo's root .gitignore unless git already ignores it. */
-async function gitIgnore(repoDir: string, dir: string): Promise<void> {
+export async function gitIgnore(repoDir: string, dir: string): Promise<void> {
   if (isIgnored(repoDir, `${dir}any-file`)) return;
 
   const file = join(repoDir, ".gitignore");
