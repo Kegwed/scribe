@@ -31,8 +31,20 @@ export async function detectModules(repoDir: string): Promise<Module[]> {
   return codeRootModules(listProductCode(repoDir), packageJson?.name);
 }
 
+/** The innermost Module containing `file`, the only one it belongs to. */
+export function moduleOf(file: string, modules: Module[]): Module | undefined {
+  let innermost: Module | undefined;
+  for (const module of modules) {
+    const contains = module.path === "." || file.startsWith(`${module.path}/`);
+    if (contains && (!innermost || innermost.path === "." || module.path.length > innermost.path.length)) {
+      innermost = module;
+    }
+  }
+  return innermost;
+}
+
 /** Repo-relative paths of Product code files that git doesn't ignore. */
-function listProductCode(repoDir: string): string[] {
+export function listProductCode(repoDir: string): string[] {
   const files = execFileSync(
     "git",
     ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],

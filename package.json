@@ -22,5 +22,8 @@
     "@types/node": "^24.19.2",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "ts-morph": "^28.0.0"
   }
 }

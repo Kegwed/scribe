@@ -8,11 +8,15 @@ async function main(argv: string[]): Promise<number> {
   const [command] = argv;
   switch (command) {
     case "init": {
-      const { modules, warnings } = await init(process.cwd());
+      const { modules, publicSurface, warnings } = await init(process.cwd());
       for (const warning of warnings) console.error(`warning: ${warning}`);
       console.log(`Detected ${modules.length} Module${modules.length === 1 ? "" : "s"}:`);
       const width = Math.max(0, ...modules.map((m) => m.name.length));
-      for (const m of modules) console.log(`  ${m.name.padEnd(width)}  ${m.path}`);
+      for (const m of modules) {
+        console.log(`  ${m.name.padEnd(width)}  ${m.path}`);
+        const exports = publicSurface[m.path] ?? [];
+        console.log(`    exports: ${exports.length > 0 ? exports.join(", ") : "(none)"}`);
+      }
       console.log(`\nTo change them, set "modules" in ${CONFIG_FILE}.`);
       return 0;
     }

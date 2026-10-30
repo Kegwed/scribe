@@ -159,6 +159,22 @@ describe("init", () => {
     ]);
   });
 
+  it("reports each Module's public surface", async () => {
+    const repo = createFixtureRepo({
+      "package.json": pkg("app"),
+      "src/auth/session.ts": "export function createSession() {}\nfunction sign() {}\n",
+      "src/auth/token.ts": "export type Token = string;\n",
+      "src/billing/invoice.ts": "const total = 1;\n",
+    });
+
+    const result = await init(repo.dir);
+
+    expect(result.publicSurface).toEqual({
+      "src/auth": ["createSession", "Token"],
+      "src/billing": [],
+    });
+  });
+
   it("writes a default config, an empty manifest, and git-ignores the cache directory", async () => {
     const repo = createFixtureRepo({
       "package.json": pkg("app"),
