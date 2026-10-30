@@ -16,7 +16,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "record": "node scripts/record-cassettes.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

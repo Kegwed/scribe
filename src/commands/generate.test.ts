@@ -34,19 +34,22 @@ describe("generate", () => {
 
     const auth = read(repo.dir, "docs/guide/modules/src-auth.md");
     expect(auth).toMatch(/^# src\/auth\n/);
-    expect(auth).toContain("`createSession` starts a session for a user.[^1]");
-    expect(auth).toContain("[^1]: src/auth/session.ts (createSession)");
+    expect(auth).toMatch(/^\[\^\d+\]: src\/auth\/session\.ts \(createSession\)$/m);
+    const [, ...prose] = auth.split("\n\n").filter((block) => !block.startsWith("[^"));
+    expect(prose.length).toBeGreaterThan(0);
+    for (const paragraph of prose) expect(paragraph).toMatch(/\[\^\d+\]$/);
     expect(existsSync(join(repo.dir, "docs/guide/modules/src-billing.md"))).toBe(true);
   });
 
   it("gives a symbol cited twice one footnote", async () => {
-    const repo = createFixtureRepo(TARGET);
+    const repo = createFixtureRepo({ "scribe.config.json": "{}", "src/a/a.ts": "export const a = 1;\n", "src/b/b.ts": "export const b = 1;\n" });
+    const llm = scriptedLlm({
+      paragraphs: [{ claims: [{ text: "One.", evidence: ["src/a/a.ts#a"] }, { text: "Two.", evidence: ["src/a/a.ts#a"] }] }],
+    });
 
-    await generate(repo.dir, {}, { llm: recordedLlm("generate") });
+    await generate(repo.dir, {}, { llm });
 
-    const auth = read(repo.dir, "docs/guide/modules/src-auth.md");
-    expect(auth).toContain("prefixes the value with `signed:`.[^1][^2]");
-    expect(auth.match(/^\[\^\d+\]:/gm)).toHaveLength(2);
+    expect(read(repo.dir, "docs/guide/modules/src-a.md")).toBe("# src/a\n\nOne.[^1] Two.[^1]\n\n[^1]: src/a/a.ts (a)\n");
   });
 
   it("writes the Guide to the configured directory", async () => {
@@ -65,7 +68,7 @@ describe("generate", () => {
     const result = await generate(repo.dir, {}, { llm: recordedLlm("generate") });
 
     expect(read(repo.dir, "docs/guide/modules/src-auth.md")).toContain(
-      `[^1]: [src/auth/session.ts (createSession)](https://github.com/acme/app/blob/${sha}/src/auth/session.ts#L3-L6)`,
+      `: [src/auth/session.ts (createSession)](https://github.com/acme/app/blob/${sha}/src/auth/session.ts#L3-L6)`,
     );
     expect(result.warnings).toEqual([]);
   });
@@ -85,7 +88,7 @@ describe("generate", () => {
 
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
 
-    expect(read(repo.dir, "docs/guide/modules/src-auth.md")).toContain("[^1]: src/auth/session.ts (createSession)");
+    expect(read(repo.dir, "docs/guide/modules/src-auth.md")).toContain(": src/auth/session.ts (createSession)");
   });
 
   it("warns when a permalink's file differs from the pinned commit", async () => {

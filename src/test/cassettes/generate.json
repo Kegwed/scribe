@@ -1,4 +1,5 @@
 {
+  "_handwritten": "These responses were written by hand, not recorded from Claude. Replace them with npm run record.",
   "e9750ade70fee973c3073ee2fbce5fc26087e8ccaac80e348ccc6b7f438687b7": "{\"paragraphs\":[{\"claims\":[{\"text\":\"`createSession` starts a session for a user.\",\"evidence\":[\"src/auth/session.ts#createSession\"]},{\"text\":\"Sessions are produced by signing the user with `sign`, which prefixes the value with `signed:`.\",\"evidence\":[\"src/auth/session.ts#createSession\",\"src/auth/sign.ts#sign\"]}]}]}",
   "71f36bbe694ffabe1cc04c671afc3eefebddb956a255f21e5cdddd09f06e8d28": "{\"paragraphs\":[{\"claims\":[{\"text\":\"`sendInvoice` reports whether an invoice amount is positive.\",\"evidence\":[\"src/billing/invoice.ts#sendInvoice\"]}]}]}"
 }
