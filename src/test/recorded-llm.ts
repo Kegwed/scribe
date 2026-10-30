@@ -1,0 +1,52 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { claudeLlm, type Llm, type LlmRequest, requestKey } from "../llm.ts";
+
+const CASSETTES = join(dirname(fileURLToPath(import.meta.url)), "cassettes");
+
+export interface RecordedLlm extends Llm {
+  /** Requests that reached this adapter, which a cache hit never does. */
+  calls: LlmRequest[];
+}
+
+/**
+ * Replays responses recorded in `cassettes/<name>.json`, keyed by request
+ * content. With SCRIBE_RECORD=1 it calls Claude for requests it has no
+ * recording of, and records them.
+ */
+export function recordedLlm(name: string): RecordedLlm {
+  const file = join(CASSETTES, `${name}.json`);
+  const cassette: Record<string, string> = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  const calls: LlmRequest[] = [];
+
+  return {
+    calls,
+    async complete(request) {
+      calls.push(request);
+      const key = requestKey(request);
+      const recorded = cassette[key];
+      if (recorded !== undefined) return recorded;
+      if (!process.env.SCRIBE_RECORD) {
+        throw new Error(`no recording of ${key} in ${file}; re-record with SCRIBE_RECORD=1\n${request.prompt}`);
+      }
+      const response = await claudeLlm().complete(request);
+      cassette[key] = response;
+      mkdirSync(CASSETTES, { recursive: true });
+      writeFileSync(file, JSON.stringify(cassette, null, 2) + "\n");
+      return response;
+    },
+  };
+}
+
+/** A fake for edge cases a live model won't reliably produce: answers every request with `response`. */
+export function scriptedLlm(response: unknown): RecordedLlm {
+  const calls: LlmRequest[] = [];
+  return {
+    calls,
+    async complete(request) {
+      calls.push(request);
+      return typeof response === "string" ? response : JSON.stringify(response);
+    },
+  };
+}

@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Node, Project, type SourceFile, ts } from "ts-morph";
+import { contentHash } from "./hash.ts";
 import { listProductCode, type Module, moduleOf } from "./modules.ts";
 
 /** A top-level declaration in Product code: the unit code Evidence is anchored to (ADR-0004). */
@@ -15,8 +15,13 @@ export interface CodeSymbol {
   module: string;
   /** Names the declaring file exports it under; empty if it isn't exported. */
   exportedAs: string[];
-  /** Hash of the symbol's own text, line endings normalised. */
+  /** The symbol's own text, line endings normalised. */
+  text: string;
+  /** Hash of `text`. */
   hash: string;
+  /** 1-based lines the symbol spans in the file as it is now. */
+  startLine: number;
+  endLine: number;
 }
 
 export interface Analysis {
@@ -132,39 +137,51 @@ function symbolsOf(file: string, module: Module, sourceFile: SourceFile): CodeSy
   for (const [exportName, nodes] of sourceFile.getExportedDeclarations()) {
     for (const node of nodes) exportNames.set(node, [...(exportNames.get(node) ?? []), exportName]);
   }
-  const grouped = new Map<string, { texts: string[]; exportedAs: Set<string> }>();
-  for (const [name, text, node] of declarationsOf(sourceFile)) {
-    const group = grouped.get(name) ?? { texts: [], exportedAs: new Set() };
+  const grouped = new Map<string, { texts: string[]; exportedAs: Set<string>; startLine: number; endLine: number }>();
+  for (const [name, text, node, statement] of declarationsOf(sourceFile)) {
+    const group = grouped.get(name) ?? {
+      texts: [],
+      exportedAs: new Set(),
+      startLine: statement.getStartLineNumber(true),
+      endLine: 0,
+    };
     group.texts.push(text);
+    group.endLine = statement.getEndLineNumber();
     const names = Node.isExportAssignment(node) ? ["default"] : (exportNames.get(node) ?? []);
     for (const exportName of names) group.exportedAs.add(exportName);
     grouped.set(name, group);
   }
-  return [...grouped].map(([name, { texts, exportedAs }]) => ({
-    id: `${file}#${name}`,
-    name,
-    file,
-    module: module.path,
-    exportedAs: [...exportedAs],
-    hash: hash(texts.join("\n")),
-  }));
+  return [...grouped].map(([name, { texts, exportedAs, startLine, endLine }]) => {
+    const text = texts.join("\n").replace(/\r\n?/g, "\n");
+    return {
+      id: `${file}#${name}`,
+      name,
+      file,
+      module: module.path,
+      exportedAs: [...exportedAs],
+      text,
+      hash: contentHash(text),
+      startLine,
+      endLine,
+    };
+  });
 }
 
 /**
- * [name, text, node] for each top-level declaration; the text includes its doc
- * comment but not other leading comments.
+ * [name, text, node, statement] for each top-level declaration; the text
+ * includes its doc comment but not other leading comments.
  */
-function* declarationsOf(sourceFile: SourceFile): Generator<[string, string, Node]> {
+function* declarationsOf(sourceFile: SourceFile): Generator<[string, string, Node, Node]> {
   for (const statement of sourceFile.getStatements()) {
     if (Node.isVariableStatement(statement)) {
       // Each declaration hashes alone, but keeps what it shares with its siblings: `export`, `const`.
       const modifiers = statement.getModifiers().map((m) => `${m.getText()} `).join("");
       const prefix = `${docText(statement)}${modifiers}${statement.getDeclarationKind()} `;
       for (const declaration of statement.getDeclarations()) {
-        yield [declaration.getName(), prefix + declaration.getText(), declaration];
+        yield [declaration.getName(), prefix + declaration.getText(), declaration, statement];
       }
     } else if (Node.isExportAssignment(statement)) {
-      yield ["default", statement.getText(), statement];
+      yield ["default", statement.getText(), statement, statement];
     } else if (
       Node.isFunctionDeclaration(statement) ||
       Node.isClassDeclaration(statement) ||
@@ -174,15 +191,11 @@ function* declarationsOf(sourceFile: SourceFile): Generator<[string, string, Nod
       Node.isModuleDeclaration(statement)
     ) {
       const name = statement.getName() ?? "default";
-      yield [name, docText(statement) + statement.getText(), statement];
+      yield [name, docText(statement) + statement.getText(), statement, statement];
     }
   }
 }
 
 function docText(node: Node): string {
   return Node.isJSDocable(node) ? node.getJsDocs().map((doc) => `${doc.getText()}\n`).join("") : "";
-}
-
-function hash(text: string): string {
-  return createHash("sha256").update(text.replace(/\r\n?/g, "\n")).digest("hex");
 }

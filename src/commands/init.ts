@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import type { Adapters } from "../adapters.ts";
 import { typescriptAnalyser } from "../analyser.ts";
 import { CONFIG_FILE, DEFAULT_CONFIG, loadConfig } from "../config.ts";
-import { CACHE_DIR, emptyManifest, MANIFEST_PATH } from "../manifest.ts";
+import { CACHE_DIR, emptyManifest, MANIFEST_PATH, saveManifest } from "../manifest.ts";
 import { detectModules, type Module } from "../modules.ts";
 
 export interface InitOptions {}
@@ -26,13 +26,13 @@ export interface InitResult {
 export async function init(
   repoDir: string,
   _options: InitOptions = {},
-  _adapters: Adapters = {},
+  _adapters: Partial<Adapters> = {},
 ): Promise<InitResult> {
   const config = await loadConfig(repoDir);
   if (!config) await writeJson(join(repoDir, CONFIG_FILE), DEFAULT_CONFIG);
 
   const manifestFile = join(repoDir, MANIFEST_PATH);
-  if (!existsSync(manifestFile)) await writeJson(manifestFile, emptyManifest());
+  if (!existsSync(manifestFile)) await saveManifest(repoDir, emptyManifest());
   await gitIgnore(repoDir, CACHE_DIR);
 
   const warnings: string[] = [];
