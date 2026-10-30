@@ -44,6 +44,21 @@ describe("init", () => {
     expect(result.modules).toEqual([{ name: "@acme/core", path: "packages/core" }]);
   });
 
+  it("falls back to the Code root when declared workspaces match no packages", async () => {
+    const repo = createFixtureRepo({
+      "package.json": pkg("app", { workspaces: [] }),
+      "src/auth/session.ts": "export function createSession() {}\n",
+      "src/billing/invoice.ts": "export function sendInvoice() {}\n",
+    });
+
+    const result = await init(repo.dir);
+
+    expect(result.modules).toEqual([
+      { name: "src/auth", path: "src/auth" },
+      { name: "src/billing", path: "src/billing" },
+    ]);
+  });
+
   it("reads pnpm workspaces from pnpm-workspace.yaml", async () => {
     const repo = createFixtureRepo({
       "package.json": pkg("root", { private: true }),
@@ -60,17 +75,21 @@ describe("init", () => {
     ]);
   });
 
-  it("yields one Module per top-level source directory when the repo has no workspaces", async () => {
+  it("yields one Module per subdirectory of the Code root, plus one for files directly in it", async () => {
     const repo = createFixtureRepo({
       "package.json": pkg("app"),
       ".gitignore": "node_modules/\ndist/\n",
-      "index.ts": "export * from './src/index.ts';\n",
-      "src/index.ts": "export const app = 1;\n",
-      "src/auth/session.ts": "export function createSession() {}\n",
-      "lib/legacy.js": "module.exports = {};\n",
+      "vitest.config.ts": "export default {};\n",
+      "src/cli.ts": "import './commands/init.ts';\n",
+      "src/config.ts": "export const config = {};\n",
+      "src/commands/init.ts": "export function init() {}\n",
+      "src/commands/init.test.ts": "// tests live with their Module\n",
+      "src/test/fixture-repo.ts": "export function createFixtureRepo() {}\n",
+      "test/e2e.test.ts": "// not Product code\n",
       "scripts/build.mjs": "console.log('build');\n",
+      "examples/demo.ts": "// not Product code\n",
       "docs/intro.md": "# Intro\n",
-      ".github/workflows/check.js": "// hidden dirs are not source\n",
+      ".github/workflows/check.js": "// hidden dirs are not Product code\n",
       "node_modules/dep/index.js": "module.exports = {};\n",
       "dist/index.js": "export const app = 1;\n",
     });
@@ -78,9 +97,43 @@ describe("init", () => {
     const result = await init(repo.dir);
 
     expect(result.modules).toEqual([
-      { name: "lib", path: "lib" },
-      { name: "scripts", path: "scripts" },
       { name: "src", path: "src" },
+      { name: "src/commands", path: "src/commands" },
+    ]);
+  });
+
+  it("descends to the Code root while all Product code sits in a single directory", async () => {
+    const repo = createFixtureRepo({
+      "package.json": pkg("app"),
+      "src/app/auth/session.ts": "export function createSession() {}\n",
+      "src/app/billing/invoice.ts": "export function sendInvoice() {}\n",
+      "test/app.test.ts": "// not Product code\n",
+    });
+
+    const result = await init(repo.dir);
+
+    expect(result.modules).toEqual([
+      { name: "src/app/auth", path: "src/app/auth" },
+      { name: "src/app/billing", path: "src/app/billing" },
+    ]);
+  });
+
+  it("treats the repo root as the Code root when Product code spans several top-level directories", async () => {
+    const repo = createFixtureRepo({
+      "package.json": pkg("app"),
+      "index.ts": "export * from './server/main.ts';\n",
+      "server/main.ts": "export function serve() {}\n",
+      "client/app.tsx": "export function App() {}\n",
+      "shared/types.ts": "export type Id = string;\n",
+    });
+
+    const result = await init(repo.dir);
+
+    expect(result.modules).toEqual([
+      { name: "app", path: "." },
+      { name: "client", path: "client" },
+      { name: "server", path: "server" },
+      { name: "shared", path: "shared" },
     ]);
   });
 
@@ -113,13 +166,30 @@ describe("init", () => {
       "src/index.ts": "export const app = 1;\n",
     });
 
-    await init(repo.dir);
+    const result = await init(repo.dir);
 
+    expect(result.warnings).toEqual([]);
     expect(readJson(repo.dir, "scribe.config.json")).toEqual({ guideDir: "docs/guide" });
     expect(readJson(repo.dir, ".scribe/manifest.json")).toEqual({ version: 1, sections: {} });
     expect(isIgnored(repo, ".scribe/cache/some-response.json")).toBe(true);
     expect(isIgnored(repo, ".scribe/manifest.json")).toBe(false);
     expect(isIgnored(repo, "node_modules/dep/index.js")).toBe(true);
+  });
+
+  it("leaves .gitignore alone when a rule already ignores the cache directory", async () => {
+    const repo = createFixtureRepo({ ".gitignore": "node_modules\n.scribe/cache\n" });
+
+    await init(repo.dir);
+
+    expect(readFileSync(join(repo.dir, ".gitignore"), "utf8")).toBe("node_modules\n.scribe/cache\n");
+  });
+
+  it("warns when an existing ignore rule would keep the manifest out of git", async () => {
+    const repo = createFixtureRepo({ ".gitignore": ".scribe/\n" });
+
+    const result = await init(repo.dir);
+
+    expect(result.warnings).toEqual([expect.stringContaining(".scribe/manifest.json")]);
   });
 
   it("keeps an existing config and manifest when run again", async () => {

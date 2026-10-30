@@ -8,7 +8,8 @@ async function main(argv: string[]): Promise<number> {
   const [command] = argv;
   switch (command) {
     case "init": {
-      const { modules } = await init(process.cwd());
+      const { modules, warnings } = await init(process.cwd());
+      for (const warning of warnings) console.error(`warning: ${warning}`);
       console.log(`Detected ${modules.length} Module${modules.length === 1 ? "" : "s"}:`);
       const width = Math.max(0, ...modules.map((m) => m.name.length));
       for (const m of modules) console.log(`  ${m.name.padEnd(width)}  ${m.path}`);

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -10,6 +11,8 @@ export interface InitOptions {}
 
 export interface InitResult {
   modules: Module[];
+  /** Problems the maintainer should fix by hand. */
+  warnings: string[];
 }
 
 /**
@@ -28,8 +31,15 @@ export async function init(
   if (!existsSync(manifestFile)) await writeJson(manifestFile, emptyManifest());
   await gitIgnore(repoDir, CACHE_DIR);
 
+  const warnings: string[] = [];
+  if (isIgnored(repoDir, MANIFEST_PATH)) {
+    warnings.push(
+      `${MANIFEST_PATH} is git-ignored; un-ignore it so the manifest is committed and shared.`,
+    );
+  }
+
   const modules = config?.modules ?? (await detectModules(repoDir));
-  return { modules };
+  return { modules, warnings };
 }
 
 async function writeJson(file: string, value: unknown): Promise<void> {
@@ -37,12 +47,22 @@ async function writeJson(file: string, value: unknown): Promise<void> {
   await writeFile(file, JSON.stringify(value, null, 2) + "\n");
 }
 
-/** Appends `pattern` to the repo's root .gitignore unless it is already listed. */
-async function gitIgnore(repoDir: string, pattern: string): Promise<void> {
+/** Appends `dir` to the repo's root .gitignore unless git already ignores it. */
+async function gitIgnore(repoDir: string, dir: string): Promise<void> {
+  if (isIgnored(repoDir, `${dir}any-file`)) return;
+
   const file = join(repoDir, ".gitignore");
   const existing = existsSync(file) ? await readFile(file, "utf8") : "";
-  if (existing.split(/\r?\n/).some((line) => line.trim() === pattern)) return;
-
   const separator = existing === "" || existing.endsWith("\n") ? "" : "\n";
-  await appendFile(file, `${separator}${pattern}\n`);
+  await appendFile(file, `${separator}${dir}\n`);
+}
+
+function isIgnored(repoDir: string, path: string): boolean {
+  const { status, stderr } = spawnSync("git", ["check-ignore", "--quiet", "--no-index", path], {
+    cwd: repoDir,
+    encoding: "utf8",
+  });
+  if (status === 0) return true;
+  if (status === 1) return false;
+  throw new Error(`git check-ignore failed: ${stderr.trim()}`);
 }

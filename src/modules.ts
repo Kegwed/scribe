@@ -3,43 +3,80 @@ import { existsSync } from "node:fs";
 import { glob, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-/** A unit of a Target repo's structure that gets its own Section. */
+/** A unit of a Target repo's Product code that gets its own Section. */
 export interface Module {
   name: string;
-  /** Repo-relative, forward-slashed directory. */
+  /** Repo-relative, forward-slashed directory; "." for the repo root. */
   path: string;
 }
 
-const SOURCE_FILE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
+const CODE_FILE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
+/** Tests, examples, fixtures and tooling: Evidence, never Modules. */
+const NON_PRODUCT_DIRS = new Set([
+  "test", "tests", "__tests__", "spec", "e2e", "__mocks__", "mocks",
+  "fixtures", "__fixtures__", "examples", "example", "scripts",
+  "bench", "benchmarks", "docs",
+]);
+const NON_PRODUCT_FILE = /\.(?:test|spec|config)\.[^.]+$/;
 
 /**
- * Workspace packages if the repo has workspaces, otherwise top-level source
- * directories.
+ * Workspace packages if the repo has any, otherwise the subdirectories of the
+ * Code root plus the files directly in it.
  */
 export async function detectModules(repoDir: string): Promise<Module[]> {
-  const patterns = await readWorkspacePatterns(repoDir);
-  if (patterns) return workspaceModules(repoDir, patterns);
-  return sourceDirectoryModules(repoDir);
+  const packageJson = await readJson(join(repoDir, "package.json"));
+  const patterns = await readWorkspacePatterns(repoDir, packageJson);
+  const workspaces = patterns ? await workspaceModules(repoDir, patterns) : [];
+  if (workspaces.length > 0) return workspaces;
+  return codeRootModules(listProductCode(repoDir), packageJson?.name);
 }
 
-/** Top-level, non-hidden directories holding source files git doesn't ignore. */
-function sourceDirectoryModules(repoDir: string): Module[] {
+/** Repo-relative paths of Product code files that git doesn't ignore. */
+function listProductCode(repoDir: string): string[] {
   const files = execFileSync(
     "git",
     ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
     { cwd: repoDir, encoding: "utf8" },
   ).split("\0");
-
-  const dirs = new Set<string>();
-  for (const file of files) {
-    const [top, ...rest] = file.split("/");
-    if (top && rest.length > 0 && !top.startsWith(".") && SOURCE_FILE.test(file)) dirs.add(top);
-  }
-  return [...dirs].sort().map((dir) => ({ name: dir, path: dir }));
+  return files.filter(isProductCode);
 }
 
-async function readWorkspacePatterns(repoDir: string): Promise<string[] | undefined> {
-  const packageJson = await readJson(join(repoDir, "package.json"));
+function isProductCode(file: string): boolean {
+  if (!CODE_FILE.test(file) || NON_PRODUCT_FILE.test(file)) return false;
+  const segments = file.split("/");
+  return segments.every((s, i) =>
+    !s.startsWith(".") && (i === segments.length - 1 || !NON_PRODUCT_DIRS.has(s)),
+  );
+}
+
+/**
+ * Descends from the repo root while all Product code sits in one directory,
+ * then yields a Module per subdirectory there, plus one for its loose files.
+ */
+function codeRootModules(files: string[], repoName: string | undefined): Module[] {
+  let root = "";
+  let remaining = files;
+  for (;;) {
+    const subdirs = new Set(remaining.filter((f) => f.includes("/")).map((f) => f.split("/")[0]!));
+    const hasLooseFiles = remaining.some((f) => !f.includes("/"));
+    const [only] = subdirs;
+    if (hasLooseFiles || subdirs.size !== 1 || only === undefined) {
+      const modules = [...subdirs].sort().map((dir) => {
+        const path = root + dir;
+        return { name: path, path };
+      });
+      if (hasLooseFiles) {
+        const path = root === "" ? "." : root.slice(0, -1);
+        modules.unshift({ name: root === "" ? (repoName ?? ".") : path, path });
+      }
+      return modules;
+    }
+    root += `${only}/`;
+    remaining = remaining.map((f) => f.slice(only.length + 1));
+  }
+}
+
+async function readWorkspacePatterns(repoDir: string, packageJson: any): Promise<string[] | undefined> {
   const workspaces = packageJson?.workspaces;
   if (Array.isArray(workspaces)) return workspaces;
   if (Array.isArray(workspaces?.packages)) return workspaces.packages;

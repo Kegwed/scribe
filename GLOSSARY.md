@@ -17,8 +17,20 @@ One independently updatable part of a Guide, such as an architecture overview or
 _Avoid_: Page, chapter, doc
 
 **Module**:
-A unit of a Target repo's structure that gets its own Section: a workspace package if the repo has workspaces, otherwise a top-level source directory, unless configured otherwise.
+A unit of a Target repo's Product code that gets its own Section: each workspace package if the repo has any, otherwise each subdirectory of the Code root plus the files directly in it, unless configured otherwise. Every file of Product code belongs to exactly one Module, the innermost one containing it.
 _Avoid_: Component, package (when meaning the general concept), service
+
+**Product code**:
+The code a Target repo exists to ship, as opposed to its tests, examples, fixtures and build scripts, which can be Evidence but are never detected as Modules.
+_Avoid_: Source code (a Source is a kind of input), app code
+
+**Code root**:
+The directory all of a Target repo's Product code lives under, found by descending from the repo root for as long as that code sits in a single directory.
+_Avoid_: Source root, src
+
+**Manifest**:
+Scribe's committed record of what it last wrote for each Section and the Evidence that Section cites.
+_Avoid_: State file, lockfile, index
 
 **Stale**:
 Said of a Section when Evidence it cites has changed since Scribe last wrote it.
