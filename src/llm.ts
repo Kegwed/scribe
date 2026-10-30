@@ -9,6 +9,7 @@ import { CACHE_DIR } from "./manifest.ts";
 export const MODELS = {
   write: "claude-sonnet-5-5",
   summarise: "claude-haiku-5-5",
+  verify: "claude-haiku-5-5",
 } as const;
 
 export interface LlmRequest {

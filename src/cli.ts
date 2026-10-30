@@ -26,7 +26,7 @@ async function main(argv: string[]): Promise<number> {
       const { droppedClaims, frozen, warnings } = await generate(process.cwd(), {}, { llm: claudeLlm() });
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
-      for (const { section, text } of droppedClaims) console.log(`Dropped from ${section}, no valid Evidence: ${text}`);
+      for (const { section, text, reason } of droppedClaims) console.log(`Dropped from ${section}: ${text} (${reason})`);
       console.log("Guide generated.");
       return 0;
     }

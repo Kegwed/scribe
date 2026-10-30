@@ -1,5 +1,8 @@
 {
   "_handwritten": "These responses were written by hand, not recorded from Claude. Replace them with npm run record.",
   "e9750ade70fee973c3073ee2fbce5fc26087e8ccaac80e348ccc6b7f438687b7": "{\"paragraphs\":[{\"claims\":[{\"text\":\"`createSession` starts a session for a user.\",\"evidence\":[\"src/auth/session.ts#createSession\"]},{\"text\":\"Sessions are produced by signing the user with `sign`, which prefixes the value with `signed:`.\",\"evidence\":[\"src/auth/session.ts#createSession\",\"src/auth/sign.ts#sign\"]}]}]}",
-  "71f36bbe694ffabe1cc04c671afc3eefebddb956a255f21e5cdddd09f06e8d28": "{\"paragraphs\":[{\"claims\":[{\"text\":\"`sendInvoice` reports whether an invoice amount is positive.\",\"evidence\":[\"src/billing/invoice.ts#sendInvoice\"]}]}]}"
+  "71f36bbe694ffabe1cc04c671afc3eefebddb956a255f21e5cdddd09f06e8d28": "{\"paragraphs\":[{\"claims\":[{\"text\":\"`sendInvoice` reports whether an invoice amount is positive.\",\"evidence\":[\"src/billing/invoice.ts#sendInvoice\"]}]}]}",
+  "75505db0bbf22edb9e23063c54308fc4ed2678214fcaf62301336ab38f3a3dd5": "{\"confirmed\":true,\"reason\":\"The cited symbols show this.\"}",
+  "0702e3d6bff35495dfb35135a992ecda5284c6e704eac5818ce21866c7f8d71e": "{\"confirmed\":true,\"reason\":\"The cited symbols show this.\"}",
+  "9cbe7e3cee661f0c8deb0bff60540cc60d23ee45e9ec66877cb7161972e43395": "{\"confirmed\":true,\"reason\":\"The cited symbols show this.\"}"
 }

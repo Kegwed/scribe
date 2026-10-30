@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { claudeLlm, type Llm, type LlmRequest, requestKey } from "../llm.ts";
+import { claudeLlm, type Llm, type LlmRequest, MODELS, requestKey } from "../llm.ts";
 
 const CASSETTES = join(dirname(fileURLToPath(import.meta.url)), "cassettes");
 
@@ -39,14 +39,27 @@ export function recordedLlm(name: string): RecordedLlm {
   };
 }
 
-/** A fake for edge cases a live model won't reliably produce: answers every request with `response`. */
-export function scriptedLlm(response: unknown): RecordedLlm {
+/**
+ * A fake for edge cases a live model won't reliably produce. Writes answer with
+ * `sections`: a list is used in turn with its last entry repeating, anything else
+ * answers every write. The verifier answers from `verdicts`, keyed by a Claim's
+ * text, and confirms any Claim not listed.
+ */
+export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown> = {}): RecordedLlm {
   const calls: LlmRequest[] = [];
+  const writes = Array.isArray(sections) ? sections : [sections];
+  let written = 0;
   return {
     calls,
     async complete(request) {
       calls.push(request);
-      return typeof response === "string" ? response : JSON.stringify(response);
+      if (request.model === MODELS.write) return text(writes[Math.min(written++, writes.length - 1)]);
+      const claim = Object.keys(verdicts).find((key) => request.prompt.includes(key));
+      return text(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);
     },
   };
+}
+
+function text(response: unknown): string {
+  return typeof response === "string" ? response : JSON.stringify(response);
 }

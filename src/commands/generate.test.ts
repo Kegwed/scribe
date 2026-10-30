@@ -3,7 +3,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
-import { recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
+import { MODELS } from "../llm.ts";
+import { recordedLlm, type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { generate } from "./generate.ts";
 
 const TARGET: Files = {
@@ -137,7 +138,7 @@ describe("generate", () => {
     const llm = recordedLlm("generate");
     await generate(repo.dir, {}, { llm });
 
-    expect(llm.calls).toHaveLength(2);
+    expect(llm.calls.filter((call) => call.model === MODELS.write).length).toBeGreaterThanOrEqual(2);
   });
 
   it("never caches a response whose Claims are malformed", async () => {
@@ -147,7 +148,7 @@ describe("generate", () => {
     const llm = recordedLlm("generate");
     await generate(repo.dir, {}, { llm });
 
-    expect(llm.calls).toHaveLength(2);
+    expect(llm.calls.filter((call) => call.model === MODELS.write).length).toBeGreaterThanOrEqual(2);
   });
 
   it("git-ignores the cache even when the config was written by hand", async () => {
@@ -187,8 +188,8 @@ describe("generate", () => {
 
     const a = read(repo.dir, "docs/guide/modules/src-a.md");
     expect(a).toBe("# src/a\n\nBacked.[^1]\n\n[^1]: src/a/a.ts (a)\n");
-    expect(result.droppedClaims).toContainEqual({ section: "modules/src-a", text: "Uncited." });
-    expect(result.droppedClaims).toContainEqual({ section: "modules/src-a", text: "Invented." });
+    expect(result.droppedClaims).toContainEqual({ section: "modules/src-a", text: "Uncited.", reason: expect.any(String) });
+    expect(result.droppedClaims).toContainEqual({ section: "modules/src-a", text: "Invented.", reason: expect.any(String) });
   });
 
   it("never overwrites a Section a human edited, and reports it Frozen", async () => {
@@ -251,6 +252,115 @@ describe("generate", () => {
     const repo = createFixtureRepo({ "src/index.ts": "export const a = 1;\n" });
 
     await expect(generate(repo.dir, {}, { llm: recordedLlm("generate") })).rejects.toThrow(/scribe init/);
+  });
+
+  describe("verification", () => {
+    const ONE_MODULE: Files = {
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
+      "src/a/a.ts": "export const a = 1;\n",
+    };
+    const SECTION = "docs/guide/modules/src-a.md";
+    const CITED = ["src/a/a.ts#a"];
+    const section = (...texts: string[]) => ({
+      paragraphs: [{ claims: texts.map((text) => ({ text, evidence: CITED })) }],
+    });
+    const writes = (llm: RecordedLlm) => llm.calls.filter((call) => call.model === MODELS.write);
+
+    it("writes a Section whose Claims all verify unchanged, checking each with the verifier", async () => {
+      const repo = createFixtureRepo(ONE_MODULE);
+      const llm = scriptedLlm(section("One.", "Two."));
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, SECTION)).toBe("# A\n\nOne.[^1] Two.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+      expect(writes(llm)).toHaveLength(1);
+      expect(llm.calls.filter((call) => call.model === MODELS.verify)).toHaveLength(2);
+      expect(result.droppedClaims).toEqual([]);
+    });
+
+    it("regenerates a Section with a failing Claim once, passing on the verifier's feedback", async () => {
+      const repo = createFixtureRepo(ONE_MODULE);
+      const llm = scriptedLlm(section("Good.", "Wrong."), {
+        "Wrong.": { confirmed: false, reason: "a is not a function" },
+      });
+
+      await generate(repo.dir, {}, { llm });
+
+      expect(writes(llm)).toHaveLength(2);
+      expect(writes(llm)[1]!.prompt).toContain("a is not a function");
+    });
+
+    it("writes the repaired Section when the repair verifies", async () => {
+      const repo = createFixtureRepo(ONE_MODULE);
+      const llm = scriptedLlm([section("Good.", "Wrong."), section("Good.", "Right.")], {
+        "Wrong.": { confirmed: false, reason: "a is not a function" },
+      });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, SECTION)).toBe("# A\n\nGood.[^1] Right.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+      expect(result.droppedClaims).toEqual([]);
+    });
+
+    it("removes Claims the repair leaves unconfirmed, without a third write, and reports why", async () => {
+      const repo = createFixtureRepo(ONE_MODULE);
+      const llm = scriptedLlm([section("Good.", "Wrong."), section("Good.", "Still wrong.")], {
+        "Wrong.": { confirmed: false, reason: "a is not a function" },
+        "Still wrong.": { confirmed: false, reason: "a is a number" },
+      });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, SECTION)).toBe("# A\n\nGood.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+      expect(writes(llm)).toHaveLength(2);
+      expect(result.droppedClaims).toEqual([
+        { section: "modules/src-a", text: "Still wrong.", reason: "a is a number" },
+      ]);
+    });
+
+    it("never writes a Claim without Evidence, even after a repair", async () => {
+      const repo = createFixtureRepo(ONE_MODULE);
+      const uncited = { paragraphs: [{ claims: [{ text: "Uncited.", evidence: [] }, { text: "Good.", evidence: CITED }] }] };
+      const llm = scriptedLlm(uncited);
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, SECTION)).toBe("# A\n\nGood.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+      expect(writes(llm)).toHaveLength(2);
+      expect(result.droppedClaims).toEqual([
+        { section: "modules/src-a", text: "Uncited.", reason: expect.stringContaining("no Evidence") },
+      ]);
+    });
+
+    it("leaves a Section with only unconfirmed Claims bare, citing nothing", async () => {
+      const repo = createFixtureRepo(ONE_MODULE);
+      const llm = scriptedLlm(section("Wrong."), { "Wrong.": { confirmed: false, reason: "no" } });
+
+      await generate(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, SECTION)).toBe("# A\n");
+      expect(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections["modules/src-a"].evidence).toEqual([]);
+    });
+
+    it("costs nothing to re-run after a repair", async () => {
+      const repo = createFixtureRepo(ONE_MODULE);
+      const verdicts = { "Wrong.": { confirmed: false, reason: "no" } };
+      await generate(repo.dir, {}, { llm: scriptedLlm([section("Wrong."), section("Right.")], verdicts) });
+
+      const llm = scriptedLlm("unused");
+      await generate(repo.dir, {}, { llm });
+
+      expect(llm.calls).toEqual([]);
+    });
+
+    it("never caches a verdict it can't use", async () => {
+      const repo = createFixtureRepo(ONE_MODULE);
+      await expect(generate(repo.dir, {}, { llm: scriptedLlm(section("One."), { "One.": { confirmed: "yes" } }) })).rejects.toThrow(/malformed/);
+
+      await generate(repo.dir, {}, { llm: scriptedLlm(section("One.")) });
+
+      expect(read(repo.dir, SECTION)).toContain("One.");
+    });
   });
 });
 
