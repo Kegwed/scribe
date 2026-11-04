@@ -43,16 +43,24 @@ export function recordedLlm(name: string): RecordedLlm {
  * A fake for edge cases a live model won't reliably produce. Writes answer with
  * `sections`: a list is used in turn with its last entry repeating, anything else
  * answers every write. The verifier answers from `verdicts`, keyed by a Claim's
- * text, and confirms any Claim not listed.
+ * text, and confirms any Claim not listed. Requests made together are answered
+ * last first, so code that depends on the order answers arrive in fails here.
  */
 export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown> = {}): RecordedLlm {
   const calls: LlmRequest[] = [];
   const writes = Array.isArray(sections) ? sections : [sections];
   let written = 0;
+  const waiting: (() => void)[] = [];
   return {
     calls,
     async complete(request) {
       calls.push(request);
+      // Spaced apart: answered in the same tick, the cache's file writes shuffled them back into any order.
+      await new Promise<void>((answer) => {
+        if (waiting.push(answer) === 1) {
+          setTimeout(() => waiting.splice(0).reverse().forEach((next, i) => setTimeout(next, i * 50)));
+        }
+      });
       if (request.model === MODELS.write) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
       const claim = Object.keys(verdicts).find((key) => request.prompt.includes(key));
       return asResponseText(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);

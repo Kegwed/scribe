@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
-import { type Llm, MODELS } from "../llm.ts";
+import { MODELS } from "../llm.ts";
 import { recordedLlm, type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { generate } from "./generate.ts";
 
@@ -295,20 +295,14 @@ describe("generate", () => {
 
     it("gives the repair its feedback in Claim order, however the verifier's answers arrive", async () => {
       const repo = createFixtureRepo(ONE_MODULE);
-      const scripted = scriptedLlm(section("First.", "Second."), {
+      const llm = scriptedLlm(section("First.", "Second."), {
         "First.": { confirmed: false, reason: "reason one" },
         "Second.": { confirmed: false, reason: "reason two" },
       });
-      const llm: Llm = {
-        async complete(request) {
-          if (request.model === MODELS.verify && request.prompt.includes("First.")) await new Promise((r) => setTimeout(r, 50));
-          return scripted.complete(request);
-        },
-      };
 
       await generate(repo.dir, {}, { llm });
 
-      const { prompt } = writes(scripted)[1]!;
+      const { prompt } = writes(llm)[1]!;
       expect(prompt.indexOf("reason one")).toBeLessThan(prompt.indexOf("reason two"));
     });
 

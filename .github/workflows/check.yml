@@ -15,6 +15,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Warn about hand-written cassettes
+        run: |
+          for file in $(grep -l '"_handwritten"' src/test/cassettes/*.json); do
+            echo "::warning file=$file::hand-written LLM responses; replace them with npm run record"
+          done
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
