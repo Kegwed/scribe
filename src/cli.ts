@@ -4,13 +4,52 @@ import { init } from "./commands/init.ts";
 import { status } from "./commands/status.ts";
 import { update } from "./commands/update.ts";
 import { CONFIG_FILE } from "./config.ts";
+import { createInterface } from "node:readline";
 import { claudeLlm } from "./llm.ts";
-import type { WriteReport } from "./section-writer.ts";
+import type { Confirm, WriteReport } from "./section-writer.ts";
 
-const USAGE = "Usage: scribe <command>\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules and pending Proposals; exits 1 unless only Frozen Sections need attention";
+const USAGE = "Usage: scribe <command> [--yes]\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules and pending Proposals; exits 1 unless only Frozen Sections need attention\n\ngenerate and update print a cost estimate and ask before calling the LLM; --yes skips asking.";
+
+/** Prints a run's estimate, then asks to go ahead unless `yes`; no answer, as when stdin closes, declines. */
+function confirmer(yes: boolean): Confirm {
+  return async ({ sections, tokens, dollars, unpriced }) => {
+    const paid = sections.filter((s) => s.tokens > 0);
+    const width = Math.max(0, ...paid.map((s) => s.section.length));
+    console.log(`Estimated cost: ${usd(dollars)} for ${paid.length} Section${paid.length === 1 ? "" : "s"}, about ${tokens.toLocaleString("en-US")} tokens`);
+    for (const s of paid) console.log(`  ${s.section.padEnd(width)}  ${usd(s.dollars)}`);
+    const cached = sections.length - paid.length;
+    if (cached > 0) console.log(`  plus ${cached} cached Section${cached === 1 ? "" : "s"} at no cost`);
+    if (unpriced.length > 0) console.log(`  not counting ${unpriced.join(", ")}, whose price Scribe doesn't know`);
+    if (yes) return true;
+    const answer = await ask("Continue? [y/N] ");
+    return /^y(es)?$/i.test(answer?.trim() ?? "");
+  };
+}
+
+function usd(dollars: number): string {
+  return `$${dollars.toFixed(dollars < 0.01 ? 4 : 2)}`;
+}
+
+async function ask(question: string): Promise<string | undefined> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await new Promise((resolve) => {
+      rl.once("close", () => resolve(undefined));
+      rl.question(question, resolve);
+    });
+  } finally {
+    rl.close();
+  }
+}
+
+function cancelled(): number {
+  console.log("Cancelled; no LLM was called and nothing was written.");
+  return 1;
+}
 
 async function main(argv: string[]): Promise<number> {
-  const [command] = argv;
+  const [command, ...flags] = argv;
+  const yes = flags.includes("--yes") || flags.includes("-y");
   switch (command) {
     case "init": {
       const { modules, publicSurface, warnings } = await init(process.cwd());
@@ -26,18 +65,20 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "generate": {
-      const { droppedClaims, frozen, reduced, warnings } = await generate(process.cwd(), {}, { llm: claudeLlm() });
+      const { declined, droppedClaims, frozen, reduced, warnings } = await generate(process.cwd(), { confirm: confirmer(yes) }, { llm: claudeLlm() });
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
+      if (declined) return cancelled();
       printReduced(reduced);
       for (const { section, text, reason } of droppedClaims) console.log(`Dropped from ${section}: ${text} (${reason})`);
       console.log("Guide generated.");
       return 0;
     }
     case "update": {
-      const { droppedClaims, frozen, proposals, reduced, removed, warnings } = await update(process.cwd(), {}, { llm: claudeLlm() });
+      const { declined, droppedClaims, frozen, proposals, reduced, removed, warnings } = await update(process.cwd(), { confirm: confirmer(yes) }, { llm: claudeLlm() });
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
+      if (declined) return cancelled();
       for (const { section, file } of proposals) console.log(`Frozen and Stale, Proposal written: ${section}; merge ${file} into it by hand, then delete it.`);
       printReduced(reduced);
       for (const { section, text, reason, proposal } of droppedClaims) {
