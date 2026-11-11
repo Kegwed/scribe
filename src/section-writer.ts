@@ -4,7 +4,8 @@ import { dirname, join } from "node:path";
 import type { CodeSymbol } from "./analyser.ts";
 import { CHURN_DAYS, type ChurnEvidence, isChurnEvidence } from "./git-history.ts";
 import { contentHash } from "./hash.ts";
-import { completeCached, type Llm, MODELS } from "./llm.ts";
+import { modelsOf } from "./config.ts";
+import { completeCached, type Llm } from "./llm.ts";
 import { saveManifest } from "./manifest.ts";
 import type { Module } from "./modules.ts";
 import { proposalPath, readSection, sectionPath, type Target } from "./target.ts";
@@ -41,6 +42,7 @@ export interface SectionWriter {
 export function sectionWriter(repoDir: string, target: Target, llm: Llm, report: WriteReport): SectionWriter {
   const { config, sectionIds, symbols, churn, manifest } = target;
   const permalinks = githubPermalinks(repoDir);
+  const models = modelsOf(config);
 
   /** A Module's Section, verified, with the symbols it cites; revised from `existing` given `changedEvidence`. */
   async function compose(module: Module, existing: string | undefined, changedEvidence: string[] | undefined, proposal?: true) {
@@ -49,7 +51,7 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
 
     const evidence = new Map(symbols.filter((s) => s.module === module.path).map((s) => [s.id, s]));
     const writeSection = (prompt: string) =>
-      completeCached(llm, repoDir, { model: MODELS.write, system: SECTION_SYSTEM, prompt, schema: SECTION_SCHEMA }, parseSection);
+      completeCached(llm, repoDir, { model: models.write, system: SECTION_SYSTEM, prompt, schema: SECTION_SCHEMA }, parseSection);
     // Scribe writes the churn Claim itself, so the model revises only the Claims it wrote, against the symbols.
     const firstPrompt = changedEvidence && existing !== undefined && record
       ? revisionPrompt(
@@ -60,10 +62,10 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
       )
       : sectionPrompt(module, [...evidence.values()]);
     let written: SectionResponse = evidence.size === 0 ? { paragraphs: [] } : await writeSection(firstPrompt);
-    let failures = await verifySection(llm, repoDir, written, evidence);
+    let failures = await verifySection(llm, models.verify, repoDir, written, evidence);
     if (failures.size > 0) {
       written = await writeSection(repairPrompt(firstPrompt, written, failures));
-      failures = await verifySection(llm, repoDir, written, evidence);
+      failures = await verifySection(llm, models.verify, repoDir, written, evidence);
     }
     const { paragraphs } = written;
 
@@ -220,6 +222,7 @@ interface SectionResponse {
 /** Why each Claim failed verification; a Claim not listed is confirmed by its cited Evidence. */
 async function verifySection(
   llm: Llm,
+  model: string,
   repoDir: string,
   { paragraphs }: SectionResponse,
   evidence: Map<string, CodeSymbol>,
@@ -229,7 +232,7 @@ async function verifySection(
     const cited = [...new Set(claim.evidence)].flatMap((id) => evidence.get(id) ?? []);
     if (cited.length === 0) return "cites no Evidence from this Module";
     const { confirmed, reason } = await completeCached(llm, repoDir, {
-      model: MODELS.verify,
+      model,
       system: VERIFY_SYSTEM,
       prompt: verifyPrompt(claim, cited),
       schema: VERDICT_SCHEMA,
