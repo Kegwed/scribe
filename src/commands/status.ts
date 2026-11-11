@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
-import { isFrozen } from "../manifest.ts";
+import { type DriftReport, isFrozen, recordedDrift } from "../manifest.ts";
 import { allEvidence, changedEvidence, guideSections, isRemovedModuleSection, openTarget, PROPOSAL_SUFFIX, proposalPath, readSection, sectionPath } from "../target.ts";
 
 export interface SectionStatus {
@@ -27,6 +27,8 @@ export interface StatusResult {
   sections: SectionStatus[];
   /** Proposals `update` wrote for Frozen, Stale Sections, pending until a human merges and deletes them (ADR-0002). */
   proposals: { section: string; file: string }[];
+  /** Where existing docs contradicted the code when Scribe last wrote each Section, as recorded in the manifest. */
+  drift: DriftReport[];
   /** Claims in adopted Sections for which no Evidence was found, as the manifest records them. */
   unsupportedClaims: { section: string; text: string }[];
 }
@@ -34,7 +36,7 @@ export interface StatusResult {
 /**
  * Reports each Section in the manifest as Stale, Frozen, missing or removed,
  * each Module without one as added, and each pending Proposal, by hashing the Target repo as it is
- * now. Calls no LLM and no network service.
+ * now, and the Drift recorded for each Section. Calls no LLM and no network service.
  */
 export async function status(repoDir: string): Promise<StatusResult> {
   const target = await openTarget(repoDir);
@@ -62,7 +64,7 @@ export async function status(repoDir: string): Promise<StatusResult> {
   }));
   const unsupportedClaims = Object.entries(manifest.sections)
     .flatMap(([section, record]) => (record.unsupportedClaims ?? []).map((text) => ({ section, text })));
-  return { sections: [...recorded, ...unrecorded], proposals: await pendingProposals(repoDir, config), unsupportedClaims };
+  return { sections: [...recorded, ...unrecorded], proposals: await pendingProposals(repoDir, config), unsupportedClaims, drift: recordedDrift(manifest) };
 }
 
 /** Every Proposal file in the Guide, including one whose Section's Module has since been removed. */

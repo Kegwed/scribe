@@ -182,6 +182,42 @@ describe("scribe status", () => {
   });
 });
 
+describe("Drift", () => {
+  async function drifting() {
+    const repo = createFixtureRepo({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
+      "README.md": "# App\n\n## Usage\n\n`a` is two.\n",
+      "src/a/a.ts": "export const a = 1;\n",
+    });
+    await generate(repo.dir, {}, {
+      llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] }, {}, {
+        drift: [{ description: "The README says a is two, but it is one.", docs: ["README.md#usage"], code: ["src/a/a.ts#a"] }],
+      }),
+    });
+    repo.commit({}, "generate the Guide");
+    return repo;
+  }
+  const LINE = "Drift: The README says a is two, but it is one. (docs: README.md#usage; code: src/a/a.ts#a; found for modules/src-a)";
+
+  it("scribe status lists Drift with the Evidence on both sides, and exits 0 when nothing else needs attention", async () => {
+    const repo = await drifting();
+
+    const { status, stdout } = scribe(repo.dir, "status");
+
+    expect(stdout).toBe(`${LINE}\n`);
+    expect(status).toBe(0);
+  });
+
+  it("scribe update reports the Drift in its run report", async () => {
+    const repo = await drifting();
+
+    const { status, stdout } = scribe(repo.dir, "update");
+
+    expect(stdout).toBe(`${LINE}\nGuide updated.\n`);
+    expect(status).toBe(0);
+  });
+});
+
 describe("scribe generate", () => {
   it("says which Modules were reduced to fit one writing request, and how", async () => {
     const huge = Array.from({ length: 20_000 }, (_, i) => `  const step${i} = value + ${i};`).join("\n");
