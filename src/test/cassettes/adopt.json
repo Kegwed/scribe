@@ -1,0 +1,5 @@
+{
+  "9bddc8b156e82c569c4a5bd83637455f2ed110ae161b81ead8de6c36d8f61503": "{\"attachments\":[{\"claim\":0,\"evidence\":[\"src/pricing/price.ts#roundPrice\"]},{\"claim\":1,\"evidence\":[\"src/pricing/price.ts#CURRENCY\"]},{\"claim\":2,\"evidence\":[]}]}",
+  "d45ab51a353c2a1d27a85f58a6f5cd7e9a7d0c104cd2c3e7bf16cbf526985f4f": "{\"confirmed\": true, \"reason\": \"The function computes Math.round(price * 100) / 100, which rounds the value to two decimal places, i.e., whole cents, matching the claim and its docstring.\"}",
+  "7ba6fd95a668febbcd951c8dd22087f0b59ad9485e3789077ddec120797db104": "{\"confirmed\": false, \"reason\": \"The symbol shows only that the exported constant CURRENCY is set to \\\"EUR\\\". It does not show that every price in the codebase uses this constant or that no other currency is used anywhere, so the universal claim 'Every price is in euros' goes beyond the supplied evidence.\"}"
+}
