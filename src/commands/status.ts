@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import type { Config } from "../config.ts";
 import { isFrozen } from "../manifest.ts";
-import { changedEvidence, isRemovedModuleSection, openTarget, proposalPath, readSection, sectionPath } from "../target.ts";
+import { changedEvidence, isRemovedModuleSection, openTarget, PROPOSAL_SUFFIX, proposalPath, readSection, sectionPath } from "../target.ts";
 
 export interface SectionStatus {
   section: string;
@@ -55,8 +57,16 @@ export async function status(repoDir: string): Promise<StatusResult> {
     const frozen = isFrozen(await readSection(repoDir, file), undefined);
     return { section, file, added: !frozen, removed: false, missing: false, frozen, stale: false, changedEvidence: [] };
   }));
-  const proposals = Object.keys(manifest.sections)
-    .map((section) => ({ section, file: proposalPath(config, section) }))
-    .filter(({ file }) => existsSync(join(repoDir, file)));
-  return { sections: [...recorded, ...unrecorded], proposals };
+  return { sections: [...recorded, ...unrecorded], proposals: await pendingProposals(repoDir, config) };
+}
+
+/** Every Proposal file in the Guide, including one whose Section's Module has since been removed. */
+async function pendingProposals(repoDir: string, config: Config): Promise<{ section: string; file: string }[]> {
+  const guide = join(repoDir, config.guideDir);
+  if (!existsSync(guide)) return [];
+  const files = (await readdir(guide, { recursive: true })).map((f) => f.replaceAll("\\", "/")).sort();
+  return files.filter((f) => f.endsWith(PROPOSAL_SUFFIX)).map((f) => {
+    const section = f.slice(0, -PROPOSAL_SUFFIX.length);
+    return { section, file: proposalPath(config, section) };
+  });
 }

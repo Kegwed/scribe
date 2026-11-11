@@ -44,8 +44,9 @@ export async function update(
     const fromScratch = !record || existing === undefined;
     if (!fromScratch && changed.length === 0) continue;
     if (isFrozen(existing, record)) {
-      result.frozen.push(section);
-      result.proposals.push({ section, file: await writer.propose(module) });
+      // Only a recorded Section can be Stale: one Scribe never wrote cites no Evidence to have changed.
+      if (record && changed.length > 0) result.proposals.push({ section, file: await writer.propose(module) });
+      else result.frozen.push(section);
       continue;
     }
     await writer.write(module, existing, fromScratch ? undefined : changed);

@@ -10,8 +10,8 @@ import { proposalPath, readSection, sectionPath, type Target } from "./target.ts
 
 export interface WriteReport {
   /** Claims still unconfirmed after the Section's repair, left out of their Sections (ADR-0001). */
-  droppedClaims: { section: string; text: string; reason: string }[];
-  /** Sections left untouched because a human has edited them (ADR-0002). */
+  droppedClaims: { section: string; text: string; reason: string; /** Dropped from the Section's Proposal, not the Section. */ proposal?: true }[];
+  /** Sections left untouched, without a Proposal, because a human has edited them (ADR-0002). */
   frozen: string[];
   /** Problems the maintainer should fix by hand. */
   warnings: string[];
@@ -42,7 +42,7 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
   const permalinks = githubPermalinks(repoDir);
 
   /** A Module's Section, verified, with the symbols it cites; revised from `existing` given `changedEvidence`. */
-  async function compose(module: Module, existing: string | undefined, changedEvidence: string[] | undefined) {
+  async function compose(module: Module, existing: string | undefined, changedEvidence: string[] | undefined, proposal?: true) {
     const section = sectionIds.get(module)!;
     const record = manifest.sections[section];
 
@@ -68,7 +68,7 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
         const { text, evidence: ids } = claim;
         const reason = failures.get(claim);
         if (reason !== undefined) {
-          report.droppedClaims.push({ section, text, reason });
+          report.droppedClaims.push({ section, text, reason, ...(proposal ? { proposal } : {}) });
           continue;
         }
         const known = ids.filter((id) => evidence.has(id));
@@ -113,7 +113,7 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
     },
 
     async propose(module) {
-      const { section, content, citedSymbols } = await compose(module, undefined, undefined);
+      const { section, content, citedSymbols } = await compose(module, undefined, undefined, true);
       const path = proposalPath(config, section);
       await save(path, await readSection(repoDir, path), section, content, citedSymbols, true);
       return path;

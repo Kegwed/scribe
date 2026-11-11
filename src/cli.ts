@@ -36,8 +36,10 @@ async function main(argv: string[]): Promise<number> {
       const { droppedClaims, frozen, proposals, removed, warnings } = await update(process.cwd(), {}, { llm: claudeLlm() });
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
-      for (const { section, file } of proposals) console.log(`Proposal written for ${section}; merge ${file} into it by hand, then delete it.`);
-      for (const { section, text, reason } of droppedClaims) console.log(`Dropped from ${section}: ${text} (${reason})`);
+      for (const { section, file } of proposals) console.log(`Frozen and Stale, Proposal written: ${section}; merge ${file} into it by hand, then delete it.`);
+      for (const { section, text, reason, proposal } of droppedClaims) {
+        console.log(`Dropped from ${proposal ? `the Proposal for ${section}` : section}: ${text} (${reason})`);
+      }
       for (const { section, file } of removed) console.log(`Module removed: ${section}; delete ${file} if it is no longer wanted.`);
       console.log("Guide updated.");
       return 0;

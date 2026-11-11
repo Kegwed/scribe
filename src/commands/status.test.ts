@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { scriptedLlm } from "../test/recorded-llm.ts";
@@ -88,6 +90,19 @@ describe("status", () => {
   it("lists pending Proposals", async () => {
     const repo = await generated();
     repo.commit({ "docs/guide/modules/src-b.proposal.md": "# B\n\nB is one.\n" });
+
+    const { proposals } = await status(repo.dir);
+
+    expect(proposals).toEqual([{ section: "modules/src-b", file: "docs/guide/modules/src-b.proposal.md" }]);
+  });
+
+  it("lists a pending Proposal whose Section's Module was removed", async () => {
+    const repo = await generated();
+    repo.git("rm", "--quiet", "-r", "src/b");
+    repo.commit({ "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }) });
+    const manifest = JSON.parse(readFileSync(join(repo.dir, ".scribe/manifest.json"), "utf8"));
+    delete manifest.sections["modules/src-b"];
+    repo.commit({ ".scribe/manifest.json": JSON.stringify(manifest), "docs/guide/modules/src-b.proposal.md": "# B\n\nB is one.\n" });
 
     const { proposals } = await status(repo.dir);
 

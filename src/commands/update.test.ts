@@ -191,7 +191,7 @@ describe("update", () => {
     expect(read(repo.dir, B)).toBe("# B\n\nMine too.\n");
     expect(read(repo.dir, A_PROPOSAL)).toBe("# A\n\nA returns two.[^1] K is three.[^2]\n\n[^1]: src/a/a.ts (a)\n[^2]: src/a/a.ts (k)\n");
     expect(existsSync(join(repo.dir, B_PROPOSAL))).toBe(false);
-    expect(result.frozen).toEqual(["modules/src-a"]);
+    expect(result.frozen).toEqual([]);
     expect(result.proposals).toEqual([{ section: "modules/src-a", file: A_PROPOSAL }]);
     expect(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections).toEqual(before);
     // Regenerated from the code, not revised from the human's text.
@@ -215,7 +215,23 @@ describe("update", () => {
     expect(writes(llm)[1]!.prompt).toContain("a returns 2");
     expect(read(repo.dir, A_PROPOSAL)).toBe("# A\n\nK is three.[^1]\n\n[^1]: src/a/a.ts (k)\n");
     expect(read(repo.dir, A)).toBe("# A\n\nMy words.\n");
-    expect(result.droppedClaims).toEqual([{ section: "modules/src-a", text: "A returns three.", reason: "a returns 2" }]);
+    expect(result.droppedClaims).toEqual([{ section: "modules/src-a", text: "A returns three.", reason: "a returns 2", proposal: true }]);
+  });
+
+  it("writes no Proposal for a hand-written Section Scribe never recorded", async () => {
+    const repo = await generated();
+    repo.commit({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }, { name: "B", path: "src/b" }, { name: "C", path: "src/c" }] }),
+      "src/c/c.ts": "export const c = 1;\n",
+      "docs/guide/modules/src-c.md": "# C\n\nMine.\n",
+    });
+    const llm = scriptedLlm("unused");
+
+    const result = await update(repo.dir, {}, { llm });
+
+    expect(existsSync(join(repo.dir, "docs/guide/modules/src-c.proposal.md"))).toBe(false);
+    expect(result.proposals).toEqual([]);
+    expect(llm.calls).toEqual([]);
   });
 
   it("leaves a pending Proposal as it is when re-run with nothing changed", async () => {
