@@ -1,15 +1,21 @@
 #!/usr/bin/env node
+import { adopt } from "./commands/adopt.ts";
 import { generate } from "./commands/generate.ts";
 import { init } from "./commands/init.ts";
+import { reset } from "./commands/reset.ts";
 import { status } from "./commands/status.ts";
 import { update } from "./commands/update.ts";
 import { CONFIG_FILE } from "./config.ts";
 import { claudeLlm } from "./llm.ts";
 
-const USAGE = "Usage: scribe <command>\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules and pending Proposals; exits 1 unless only Frozen Sections need attention";
+const USAGE = "Usage: scribe <command>\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules, pending Proposals and Unsupported Claims; exits 1 unless only Frozen Sections or Unsupported Claims need attention\n  adopt <section>  Take a Frozen Section's text as the new baseline, recording its Evidence and Unsupported Claims\n  reset <section>  Discard a Section's human edits and regenerate it";
 
 async function main(argv: string[]): Promise<number> {
-  const [command] = argv;
+  const [command, section] = argv;
+  if ((command === "adopt" || command === "reset") && section === undefined) {
+    console.error(`Usage: scribe ${command} <section>\n\nThe Sections are named as scribe status lists them, such as modules/src-core.`);
+    return 1;
+  }
   switch (command) {
     case "init": {
       const { modules, publicSurface, warnings } = await init(process.cwd());
@@ -45,7 +51,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "status": {
-      const { sections, proposals } = await status(process.cwd());
+      const { sections, proposals, unsupportedClaims } = await status(process.cwd());
       const attention = sections.filter((s) => s.added || s.removed || s.missing || s.frozen || s.stale);
       for (const { section, added, removed, missing, frozen, stale, changedEvidence } of attention) {
         const label = added ? "Module added, no Section yet"
@@ -58,8 +64,24 @@ async function main(argv: string[]): Promise<number> {
         console.log(`${label}: ${section}${changes}`);
       }
       for (const { section, file } of proposals) console.log(`Proposal to merge by hand: ${section} (${file})`);
-      if (attention.length === 0 && proposals.length === 0) console.log(`All ${sections.length} Section${sections.length === 1 ? "" : "s"} current.`);
+      for (const { section, text } of unsupportedClaims) console.log(`Unsupported Claim in ${section}: ${text}`);
+      if (attention.length === 0 && proposals.length === 0 && unsupportedClaims.length === 0) console.log(`All ${sections.length} Section${sections.length === 1 ? "" : "s"} current.`);
       return proposals.length > 0 || sections.some((s) => s.added || s.removed || s.missing || s.stale) ? 1 : 0;
+    }
+    case "adopt": {
+      const { unsupportedClaims, clearedProposal } = await adopt(process.cwd(), section!, {}, { llm: claudeLlm() });
+      for (const { text } of unsupportedClaims) console.log(`Unsupported Claim, kept: ${text}`);
+      if (clearedProposal) console.log(`Proposal deleted: ${clearedProposal}`);
+      console.log(`Adopted ${section}.`);
+      return 0;
+    }
+    case "reset": {
+      const { droppedClaims, warnings, clearedProposal } = await reset(process.cwd(), section!, {}, { llm: claudeLlm() });
+      for (const warning of warnings) console.error(`warning: ${warning}`);
+      for (const { text, reason } of droppedClaims) console.log(`Dropped from ${section}: ${text} (${reason})`);
+      if (clearedProposal) console.log(`Proposal deleted: ${clearedProposal}`);
+      console.log(`Reset ${section}.`);
+      return 0;
     }
     default:
       console.error(USAGE);
