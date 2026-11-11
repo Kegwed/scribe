@@ -302,6 +302,23 @@ describe("generate", () => {
       expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: [] }]);
     });
 
+    it("against recorded responses, writes a cited Section from summaries and records its Evidence", async () => {
+      const repo = createFixtureRepo(LARGE);
+      const llm = recordedLlm("reduce", { promptLimit: LIMIT });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      const a = read(repo.dir, SECTION);
+      expect(a).toMatch(/^# A\n/);
+      expect(a).toMatch(/^\[\^\d+\]: src\/a\/a\.ts \(helper\)$/m);
+      const [, ...prose] = a.split("\n\n").filter((block) => !block.startsWith("[^"));
+      expect(prose.length).toBeGreaterThan(0);
+      for (const paragraph of prose) expect(paragraph).toMatch(/\[\^\d+\]$/);
+      const { evidence } = JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections["modules/src-a"];
+      expect(evidence.map((e: { id: string }) => e.id)).toContain("src/a/a.ts#helper");
+      expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: [] }]);
+    });
+
     it("sends a Module that fits whole, with no summaries and nothing reported", async () => {
       const repo = createFixtureRepo(LARGE);
       const llm = scriptedLlm(cites("Run delegates to a helper.", "src/a/a.ts#run"), {}, { promptLimit: 10_000 });

@@ -280,4 +280,55 @@ describe("update", () => {
 
     await expect(update(repo.dir, {}, { llm: scriptedLlm("unused") })).rejects.toThrow(/scribe init/);
   });
+
+  describe("a Module too large for one writing request", () => {
+    const LIMIT = 1500;
+    const large = (offset: number): Files => ({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
+      "src/a/a.ts": [
+        "export function run(value: number) {",
+        "  return helper(value);",
+        "}",
+        "",
+        "function helper(value: number) {",
+        ...Array.from({ length: 40 }, (_, i) => `  const step${i} = value + ${i + offset};`),
+        "  return value;",
+        "}",
+        "",
+        `export const NAMES = [${Array.from({ length: 40 }, (_, i) => `"n${i}"`).join(", ")}];`,
+        "",
+      ].join("\n"),
+    });
+    const CLAIM = { paragraphs: [{ claims: [{ text: "Run delegates to a helper.", evidence: ["src/a/a.ts#run", "src/a/a.ts#helper"] }] }] };
+
+    async function generatedLarge() {
+      const repo = createFixtureRepo(large(0));
+      await generate(repo.dir, {}, { llm: scriptedLlm(CLAIM, {}, { promptLimit: LIMIT }) });
+      repo.commit(large(1), "change the helper");
+      return repo;
+    }
+
+    it("revises its Stale Section from summaries, within the limit and with the Section's current text", async () => {
+      const repo = await generatedLarge();
+      const llm = scriptedLlm(CLAIM, {}, { promptLimit: LIMIT });
+
+      const result = await update(repo.dir, {}, { llm });
+
+      const [revision] = writes(llm);
+      expect(revision!.prompt.length).toBeLessThanOrEqual(LIMIT);
+      expect(revision!.prompt).toContain("Run delegates to a helper.");
+      expect(revision!.prompt).toContain('<changed id="src/a/a.ts#helper" status="changed"/>');
+      expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: [] }]);
+    });
+
+    it("reports the reduction as the Proposal's when the Section is Frozen", async () => {
+      const repo = await generatedLarge();
+      repo.commit({ [A]: "# A\n\nMy words.\n" });
+
+      const result = await update(repo.dir, {}, { llm: scriptedLlm(CLAIM, {}, { promptLimit: LIMIT }) });
+
+      expect(read(repo.dir, A_PROPOSAL)).toContain("Run delegates to a helper.");
+      expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: [], proposal: true }]);
+    });
+  });
 });
