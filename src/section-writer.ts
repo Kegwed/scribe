@@ -43,6 +43,14 @@ export function totalCost(sections: SectionCost[]): CostEstimate {
   };
 }
 
+/** Asked with a run's estimate before any LLM call; the run goes ahead only on true. */
+export type Confirm = (estimate: CostEstimate) => Promise<boolean>;
+
+/** Whether a run may go ahead: one that costs nothing always may, and so may one nobody is asked about. */
+export async function confirmed(estimate: CostEstimate, confirm: Confirm | undefined): Promise<boolean> {
+  return estimate.tokens === 0 || !confirm || (await confirm(estimate));
+}
+
 export interface SectionWriter {
   /**
    * What `write` (or `propose`, given no `existing`) would cost for a Module's

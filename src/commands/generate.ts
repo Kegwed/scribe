@@ -1,7 +1,7 @@
 import type { Adapters } from "../adapters.ts";
 import { CACHE_DIR, isFrozen } from "../manifest.ts";
 import type { Module } from "../modules.ts";
-import { type CostEstimate, emptyReport, sectionWriter, totalCost, type WriteReport } from "../section-writer.ts";
+import { type Confirm, confirmed, type CostEstimate, emptyReport, sectionWriter, totalCost, type WriteReport } from "../section-writer.ts";
 import { openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
 
@@ -12,8 +12,6 @@ export interface GenerateOptions {
    */
   confirm?: Confirm;
 }
-
-export type Confirm = (estimate: CostEstimate) => Promise<boolean>;
 
 export interface GenerateResult extends WriteReport {
   estimate: CostEstimate;
@@ -49,9 +47,4 @@ export async function generate(
   await gitIgnore(repoDir, CACHE_DIR);
   for (const { module, existing } of planned) await writer.write(module, existing);
   return { ...report, estimate, declined: false };
-}
-
-/** Whether a run may go ahead: one that costs nothing always may. */
-export async function confirmed(estimate: CostEstimate, confirm: Confirm | undefined): Promise<boolean> {
-  return estimate.tokens === 0 || !confirm || (await confirm(estimate));
 }
