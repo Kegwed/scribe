@@ -1,17 +1,9 @@
 import type { Adapters } from "../adapters.ts";
 import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR, isFrozen, recordedDrift, saveManifest } from "../manifest.ts";
-import { type Confirm, confirmed, type CostEstimate, emptyReport, estimateRun, sectionWriter, type WriteReport } from "../section-writer.ts";
+import { confirmed, type CostEstimate, emptyReport, estimateRun, type RunOptions, sectionWriter, type WriteReport } from "../section-writer.ts";
 import { allEvidence, changedEvidence, guideSections, isRemovedModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
-
-export interface UpdateOptions {
-  /**
-   * Asked before any LLM call, unless the run costs nothing; the run stops
-   * there, changing no files, unless it answers true. Without it the run goes ahead.
-   */
-  confirm?: Confirm;
-}
 
 export interface UpdateResult extends WriteReport {
   /** Sections whose Module no longer exists: their records are dropped, their files left for a human to delete. */
@@ -37,7 +29,7 @@ type Planned =
  */
 export async function update(
   repoDir: string,
-  { confirm }: UpdateOptions,
+  { confirm }: RunOptions,
   { llm, github }: Adapters,
 ): Promise<UpdateResult> {
   const target = await openTarget(repoDir);

@@ -74,6 +74,15 @@ export function totalCost(sections: SectionCost[]): CostEstimate {
 /** Asked with a run's estimate before any LLM call; the run goes ahead only on true. */
 export type Confirm = (estimate: CostEstimate) => Promise<boolean>;
 
+/** Options of a run that writes the Guide, such as `generate` or `update`. */
+export interface RunOptions {
+  /**
+   * Asked before any LLM call, unless the run costs nothing; the run stops
+   * there, changing no files, unless it answers true. Without it the run goes ahead.
+   */
+  confirm?: Confirm;
+}
+
 /** Whether a run may go ahead: one that costs nothing always may, and so may one nobody is asked about. */
 export async function confirmed(estimate: CostEstimate, confirm: Confirm | undefined): Promise<boolean> {
   return estimate.tokens === 0 || !confirm || (await confirm(estimate));
@@ -377,6 +386,8 @@ export function sectionWriter(
 
   /** A Section, verified, with the Evidence it cites; revised from `existing` given `changedEvidence`. */
   async function compose(section: string, existing: string | undefined, changedEvidence: string[] | undefined, proposal?: true) {
+    // What the report says of this write: which Section, and whether it is for the Section's Proposal.
+    const of = { section, ...(proposal ? { proposal } : {}) };
     const whole = subject(section);
     const plan = planFirstWrite(section, whole, existing, changedEvidence);
     const summaries = await Promise.all(summaryRequests(models.summarise, plan).map((request) =>
@@ -384,7 +395,7 @@ export function sectionWriter(
     const fitted = finishFit(plan, summaries);
     if (fitted.summarised.length > 0 || fitted.leftOut.length > 0) {
       const { summarised, leftOut } = fitted;
-      report.reduced.push({ section, summarised, leftOut, ...(proposal ? { proposal } : {}) });
+      report.reduced.push({ ...of, summarised, leftOut });
     }
     // Claims may cite only the Evidence the request carried, and are verified against its full text.
     const about: Subject = { ...whole, evidence: new Map(fitted.sent.map((e) => [e.id, e])) };
@@ -399,7 +410,7 @@ export function sectionWriter(
     let written: SectionResponse = about.writes(fitted.sent) ? await writeSection(firstPrompt) : { paragraphs: [] };
     let failures = await verifySection(llm, models.verify, repoDir, scribes(written), about);
     const firstWritten = scribes(written).paragraphs.reduce((sum, p) => sum + p.claims.length, 0);
-    const counts = { section, written: firstWritten, confirmed: firstWritten - failures.size, kept: 0, ...(proposal ? { proposal } : {}) };
+    const counts = { ...of, written: firstWritten, confirmed: firstWritten - failures.size, kept: 0 };
     report.verifiedClaims.push(counts);
     if (failures.size > 0) {
       written = await writeSection(repairPrompt(firstPrompt, written, failures));
@@ -421,7 +432,7 @@ export function sectionWriter(
         }
         const reason = failures.get(claim);
         if (reason !== undefined) {
-          report.droppedClaims.push({ section, text, reason, ...(proposal ? { proposal } : {}) });
+          report.droppedClaims.push({ ...of, text, reason });
           continue;
         }
         counts.kept++;
@@ -509,12 +520,13 @@ export function sectionWriter(
           ),
         ] : []),
       ];
-      return {
+      const { tokens, dollars, unpriced } = totalCost(costs.map((c) => ({
         section,
-        tokens: costs.reduce((sum, c) => sum + c.tokens, 0),
-        dollars: costs.reduce((sum, c) => sum + (c.dollars ?? 0), 0),
-        unpriced: [...new Set(costs.flatMap((c) => (c.dollars === undefined ? [c.model] : [])))],
-      };
+        tokens: c.tokens,
+        dollars: c.dollars ?? 0,
+        unpriced: c.dollars === undefined ? [c.model] : [],
+      })));
+      return { section, tokens, dollars, unpriced };
     },
 
     async write(section, existing, changedEvidence) {

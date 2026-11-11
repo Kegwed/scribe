@@ -1,17 +1,9 @@
 import type { Adapters } from "../adapters.ts";
 import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR, isFrozen, recordedDrift } from "../manifest.ts";
-import { type Confirm, confirmed, type CostEstimate, emptyReport, estimateRun, sectionWriter, type WriteReport } from "../section-writer.ts";
+import { confirmed, type CostEstimate, emptyReport, estimateRun, type RunOptions, sectionWriter, type WriteReport } from "../section-writer.ts";
 import { allEvidence, changedEvidence, guideSections, openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
-
-export interface GenerateOptions {
-  /**
-   * Asked before any LLM call, unless the run costs nothing; the run stops
-   * there, changing no files, unless it answers true. Without it the run goes ahead.
-   */
-  confirm?: Confirm;
-}
 
 export interface GenerateResult extends WriteReport {
   estimate: CostEstimate;
@@ -31,7 +23,7 @@ export interface GenerateResult extends WriteReport {
  */
 export async function generate(
   repoDir: string,
-  { confirm }: GenerateOptions,
+  { confirm }: RunOptions,
   { llm, github }: Adapters,
 ): Promise<GenerateResult> {
   const target = await openTarget(repoDir);
