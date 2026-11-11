@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { MODELS, type Models } from "./llm.ts";
 import type { Module } from "./modules.ts";
 
 export const CONFIG_FILE = "scribe.config.json";
@@ -10,6 +11,13 @@ export interface Config {
   guideDir: string;
   /** When set, replaces Module detection entirely. */
   modules?: Module[];
+  /** Overrides the default model for each kind of request it names. */
+  models?: Partial<Models>;
+}
+
+/** The models to use: the config's overrides over the defaults (ADR-0003). */
+export function modelsOf(config: Config): Models {
+  return { ...MODELS, ...config.models };
 }
 
 export const DEFAULT_CONFIG: Config = { guideDir: "docs/guide" };
