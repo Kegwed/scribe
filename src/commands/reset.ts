@@ -30,8 +30,9 @@ export async function reset(
   await saveCache();
 
   const existing = await readSection(repoDir, sectionPath(target.config, section));
-  // An adopted record carries Unsupported Claims, so it is replaced even if the text comes out the same.
-  const previous = target.manifest.sections[section]?.unsupportedClaims ? undefined : existing;
+  // An adopted record can carry Unsupported Claims, so it is replaced even if the text comes out the same.
+  const record = target.manifest.sections[section];
+  const previous = record?.adopted || record?.unsupportedClaims ? undefined : existing;
   await sectionWriter(repoDir, target, llm, result, discussions).write(section, previous);
   const clearedProposal = await clearProposal(repoDir, target.config, section);
   if (clearedProposal) result.clearedProposal = clearedProposal;

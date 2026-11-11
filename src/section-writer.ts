@@ -368,15 +368,24 @@ export function sectionWriter(
     const present = new Set(about.evidence.keys());
     // Scribe writes the churn Claim itself, so the model revises only the Claims it wrote, against their Evidence.
     const build = (rendered: string[]) => changedEvidence && existing !== undefined && record
-      ? revisionPrompt(
-        about.frame(rendered),
-        present,
-        withoutChurn(citingIds(existing, record.evidence.map((e) => e.id))),
-        changedEvidence.filter((id) => !isChurnEvidence(id)),
-        about.item,
-      )
+      ? revisionPrompt(about.frame(rendered), present, {
+        // An adopted Section's footnotes are a human's, which name no recorded Evidence.
+        current: record.adopted
+          ? withoutStatement(withoutCitations(existing), about.churn?.statement)
+          : withoutChurn(citingIds(existing, record.evidence.map((e) => e.id))),
+        cited: !record.adopted,
+        changedEvidence: changedEvidence.filter((id) => !isChurnEvidence(id)),
+        unsupported: record.unsupportedClaims ?? [],
+        item: about.item,
+      })
       : about.frame(rendered);
     return planFit(about.items, about.render, build, llm.promptLimit);
+  }
+
+  /** The Unsupported Claims a write of `section` keeps word for word: those of its record, if it revises the Section. */
+  function keptUnsupported(section: string, existing: string | undefined, changedEvidence: string[] | undefined): Set<string> {
+    const record = manifest.sections[section];
+    return new Set(changedEvidence && existing !== undefined && record ? record.unsupportedClaims ?? [] : []);
   }
 
   function writeRequestFor(about: Subject, fitted: FittedPrompt, prompt: string): LlmRequest {
@@ -398,25 +407,35 @@ export function sectionWriter(
     const about: Subject = { ...whole, evidence: new Map(fitted.sent.map((e) => [e.id, e])) };
     const { evidence } = about;
 
+    // A human's Unsupported Claims are kept word for word, uncited: no Evidence backs them, and Scribe never removes them (ADR-0001).
+    const unsupported = keptUnsupported(section, existing, changedEvidence);
+    const scribes = ({ paragraphs }: SectionResponse): SectionResponse =>
+      ({ paragraphs: paragraphs.map(({ claims }) => ({ claims: claims.filter(({ text }) => !unsupported.has(text)) })) });
     const writeSection = (prompt: string) => completeCached(llm, repoDir, writeRequestFor(about, fitted, prompt), parseSection);
     const firstPrompt = fitted.prompt;
     let written: SectionResponse = about.writes(fitted.sent) ? await writeSection(firstPrompt) : { paragraphs: [] };
-    let failures = await verifySection(llm, models.verify, repoDir, written, about);
-    const firstWritten = written.paragraphs.reduce((sum, p) => sum + p.claims.length, 0);
+    let failures = await verifySection(llm, models.verify, repoDir, scribes(written), about);
+    const firstWritten = scribes(written).paragraphs.reduce((sum, p) => sum + p.claims.length, 0);
     const counts = { section, written: firstWritten, confirmed: firstWritten - failures.size, kept: 0, ...(proposal ? { proposal } : {}) };
     report.verifiedClaims.push(counts);
     if (failures.size > 0) {
       written = await writeSection(repairPrompt(firstPrompt, written, failures));
-      failures = await verifySection(llm, models.verify, repoDir, written, about);
+      failures = await verifySection(llm, models.verify, repoDir, scribes(written), about);
     }
     const { paragraphs } = written;
 
     const cited = new Map<string, Evidence>();
     const body: string[] = [];
+    const placed = new Set<string>();
     for (const { claims } of paragraphs) {
       const sentences: string[] = [];
       for (const claim of claims) {
         const { text, evidence: ids } = claim;
+        if (unsupported.has(text)) {
+          if (!placed.has(text)) sentences.push(text);
+          placed.add(text);
+          continue;
+        }
         const reason = failures.get(claim);
         if (reason !== undefined) {
           report.droppedClaims.push({ section, text, reason, ...(proposal ? { proposal } : {}) });
@@ -430,6 +449,9 @@ export function sectionWriter(
       }
       if (sentences.length > 0) body.push(sentences.join(" "));
     }
+    // Those the revision left out go last, before the churn Claim, so none is lost.
+    const unplaced = [...unsupported].filter((text) => !placed.has(text));
+    if (unplaced.length > 0) body.push(unplaced.join(" "));
 
     const citedEvidence = [...cited.values()];
     const footnotes = citedEvidence.map((item, i) => `[^${i + 1}]: ${citation(item, permalinks)}`);
@@ -440,7 +462,7 @@ export function sectionWriter(
     }
     const content = [`# ${about.title}`, ...body, ...(footnotes.length > 0 ? [footnotes.join("\n")] : [])].join("\n\n") + "\n";
     const evidenceRecords = [...citedEvidence, ...(churnCited ? [churnCited] : [])].map(({ id, hash }) => ({ id, hash }));
-    return { content, citedEvidence, evidenceRecords };
+    return { content, citedEvidence, evidenceRecords, unsupportedClaims: [...unsupported] };
   }
 
   /** Writes `content` to `path` unless `previous` differs from it only in where its links pin; returns whether it wrote. */
@@ -495,7 +517,7 @@ export function sectionWriter(
     },
 
     async write(section, existing, changedEvidence) {
-      const { content, citedEvidence, evidenceRecords } = await compose(section, existing, changedEvidence);
+      const { content, citedEvidence, evidenceRecords, unsupportedClaims } = await compose(section, existing, changedEvidence);
       const drift = await findDrift(section);
       const path = sectionPath(config, section);
       const previous = manifest.sections[section];
@@ -508,6 +530,8 @@ export function sectionWriter(
         evidence: evidenceRecords,
         // Unwritten, the file keeps its old pins, which is what its hash must match.
         contentHash: contentHash(wrote ? content : existing!),
+        ...(unsupportedClaims.length > 0 ? { unsupportedClaims } : {}),
+        ...(!wrote && previous?.adopted ? { adopted: true as const } : {}),
         ...(drift.length > 0 ? { drift } : {}),
       };
       // Saved per Section: a file written but unrecorded would read as Frozen on the next run.
@@ -552,6 +576,7 @@ export function sectionWriter(
         evidence: [...cited.values(), ...(churnKept ? [churnKept] : [])].map(({ id, hash }) => ({ id, hash })),
         contentHash: contentHash(content),
         ...(unsupported.length > 0 ? { unsupportedClaims: unsupported } : {}),
+        adopted: true,
         ...(drift.length > 0 ? { drift } : {}),
       };
       await saveManifest(repoDir, manifest);
@@ -663,8 +688,16 @@ function withoutChurn(content: string): string {
   const churn = footnotes.at(-1)?.match(/^\[\^(\d+)\]: (\S+)$/);
   if (!churn || !isChurnEvidence(churn[2]!)) return content;
   footnotes.pop();
-  const kept = blocks.filter((block) => !block.endsWith(`[^${churn[1]}]`));
-  return [...kept, ...(footnotes.length > 0 ? [footnotes.join("\n")] : [])].join("\n\n") + "\n";
+  // Only the last paragraph: Scribe writes the churn Claim there, alone.
+  if (blocks.at(-1)?.endsWith(`[^${churn[1]}]`)) blocks.pop();
+  return [...blocks, ...(footnotes.length > 0 ? [footnotes.join("\n")] : [])].join("\n\n") + "\n";
+}
+
+/** `content` without the sentence `statement`, if given, wherever it stands; a paragraph it leaves empty goes too. */
+function withoutStatement(content: string, statement: string | undefined): string {
+  if (statement === undefined) return content;
+  const blocks = content.replace(/\n$/, "").split("\n\n").map((block) => block.split(statement).join("").replace(/ {2,}/g, " ").trim());
+  return blocks.filter((block) => block !== "").join("\n\n") + "\n";
 }
 
 function withoutPins(content: string): string {
@@ -1036,14 +1069,35 @@ function parseDrift(response: string): { drift: FoundDrift[] } {
   return parsed;
 }
 
-/** `items` names what the Evidence is, e.g. "symbol", in the instruction. */
-function revisionPrompt(prompt: string, present: Set<string>, current: string, changedEvidence: string[], item: string): string {
+interface Revision {
+  /** The Section's text as it is now, without the churn Claim. */
+  current: string;
+  /** Whether each footnote of `current` names the id of the Evidence it cites; an adopted Section's text comes without footnotes. */
+  cited: boolean;
+  changedEvidence: string[];
+  /** Claims a human wrote that no Evidence backs, to keep word for word. */
+  unsupported: string[];
+  /** What one piece of the Evidence is called, e.g. "symbol", in the instruction. */
+  item: string;
+}
+
+/** `prompt` writes the Section afresh; Revision says what it is now and what changed. */
+function revisionPrompt(prompt: string, present: Set<string>, { current, cited, changedEvidence, unsupported, item }: Revision): string {
   const changes = changedEvidence.map((id) => `<changed id="${id}" status="${present.has(id) ? "changed" : "gone"}"/>`);
   return [
     prompt,
     `<current-section>\n${current}</current-section>`,
     ...changes,
-    `The current Section above was written before the listed ${item}s changed or went away; each footnote names the id of the ${item} it cites. Write the Section again: keep every Claim the changes don't affect word for word, citing the same evidence, and correct, add or remove only the Claims the changes do affect.`,
+    ...unsupported.map((text) => `<unsupported-claim>\n${text}\n</unsupported-claim>`),
+    [
+      cited
+        ? `The current Section above was written before the listed ${item}s changed or went away; each footnote names the id of the ${item} it cites.`
+        : `The current Section above was written by a human, before the listed ${item}s changed or went away; its footnotes are left out.`,
+      `Write the Section again: keep every Claim the changes don't affect word for word, citing ${cited ? "the same evidence" : "the evidence that backs it"}, and correct, add or remove only the Claims the changes do affect.`,
+      ...(unsupported.length > 0
+        ? [`Each <unsupported-claim> is a human's Claim that no Evidence backs: keep it word for word, with no evidence.`]
+        : []),
+    ].join(" "),
   ].join("\n\n");
 }
 

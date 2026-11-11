@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { fakeGitHub } from "../test/fake-github.ts";
-import { recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
+import { isSectionWrite, recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { STABLE } from "../test/sections.ts";
 import { adopt } from "./adopt.ts";
 import { generate } from "./generate.ts";
@@ -47,22 +47,50 @@ async function generated(files: Files = TARGET) {
 }
 
 describe("adopt against recorded responses", () => {
-  it("records Evidence for the human's Claims the code backs and keeps the rest as Unsupported", async () => {
+  const PRICE = [
+    "/** Rounds a price to whole cents. */",
+    "export function roundPrice(price: number) {",
+    "  return Math.round(price * 100) / 100;",
+    "}",
+    "",
+    'export const CURRENCY = "EUR";',
+    "",
+  ].join("\n");
+  const PRICING = "docs/guide/modules/src-pricing.md";
+
+  /** A Pricing Section generated, then rewritten by a human and committed. */
+  async function humanPricing() {
     const repo = createFixtureRepo({
       "scribe.config.json": JSON.stringify({ modules: [{ name: "Pricing", path: "src/pricing" }] }),
-      "src/pricing/price.ts": [
-        "/** Rounds a price to whole cents. */",
-        "export function roundPrice(price: number) {",
-        "  return Math.round(price * 100) / 100;",
-        "}",
-        "",
-        'export const CURRENCY = "EUR";',
-        "",
-      ].join("\n"),
+      "src/pricing/price.ts": PRICE,
     });
     await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "Prices are in euros.", evidence: ["src/pricing/price.ts#CURRENCY"] }] }] }) });
     const mine = "# Pricing\n\nroundPrice rounds a price to whole cents. Every price is in euros.\n\nThe team plans to add more currencies next year.\n";
-    repo.commit({ "docs/guide/modules/src-pricing.md": mine });
+    repo.commit({ [PRICING]: mine });
+    return { repo, mine };
+  }
+
+  it("keeps the Unsupported Claims of an adopted Section through update's revision of it", async () => {
+    const { repo } = await humanPricing();
+    const { unsupportedClaims } = await adopt(repo.dir, "modules/src-pricing", {}, { llm: recordedLlm("adopt") });
+    expect(unsupportedClaims.length).toBeGreaterThan(0);
+    repo.commit({ "src/pricing/price.ts": PRICE.replace("Math.round", "Math.floor").replace('"EUR"', '"USD"') }, "adopt, then change pricing");
+
+    await update(repo.dir, {}, { llm: recordedLlm("adopt") });
+
+    const section = read(repo.dir, PRICING);
+    for (const { text } of unsupportedClaims) expect(section).toContain(text);
+    const record = manifest(repo.dir).sections["modules/src-pricing"];
+    expect(record.unsupportedClaims).toEqual(unsupportedClaims.map(({ text }) => text));
+    expect(record).not.toHaveProperty("adopted");
+    for (const note of section.split("\n").filter((line) => line.startsWith("[^"))) {
+      expect(note).toMatch(/^\[\^\d+\]: (?:src\/pricing\/price\.ts \((?:roundPrice|CURRENCY)\)|git history of src\/pricing \(90 days\))$/);
+    }
+    expect((await status(repo.dir)).sections[0]).toEqual(expect.objectContaining({ frozen: false, stale: false }));
+  });
+
+  it("records Evidence for the human's Claims the code backs and keeps the rest as Unsupported", async () => {
+    const { repo, mine } = await humanPricing();
 
     const { unsupportedClaims } = await adopt(repo.dir, "modules/src-pricing", {}, { llm: recordedLlm("adopt") });
 
@@ -103,6 +131,7 @@ describe("adopt", () => {
       evidence: generatedEvidence.filter((e: { id: string }) => !e.id.startsWith("history:")),
       contentHash: sha256(mine),
       unsupportedClaims: ["A is fast."],
+      adopted: true,
     });
   });
 
@@ -227,6 +256,72 @@ describe("adopt", () => {
 
     expect(llm.calls).toEqual([]);
     expect(repo.git("status", "--porcelain")).toBe("");
+  });
+
+  describe("then update, once the adopted Section is Stale", () => {
+    /** A adopted with a footnote of the human's own and the Unsupported Claim "A is fast.", then a changed. */
+    async function adoptedThenChanged() {
+      const repo = await generated();
+      repo.commit({ [A]: "# A\n\nA returns one.[^1] A is fast.\n\n[^1]: my own note\n" });
+      await adopt(repo.dir, "modules/src-a", {}, {
+        llm: scriptedLlm("unused", { "A is fast.": { confirmed: false, reason: "nothing shows speed" } }, { attachments: { "A returns one.": ["src/a/a.ts#a"] } }),
+      });
+      repo.commit({ "src/a/a.ts": "export function a() {\n  return 2;\n}\n\nexport const k = 3;\n" }, "adopt A, change a");
+      return repo;
+    }
+
+    it("keeps an Unsupported Claim the revision leaves out, asking it to keep it and never verifying it", async () => {
+      const repo = await adoptedThenChanged();
+      const llm = scriptedLlm({ paragraphs: [{ claims: [{ text: "A returns two.", evidence: ["src/a/a.ts#a"] }] }] });
+
+      await update(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, A)).toBe(`# A\n\nA returns two.[^1]\n\nA is fast.\n\n${STABLE}[^2]\n\n[^1]: src/a/a.ts (a)\n[^2]: git history of src/a (90 days)\n`);
+      const prompt = llm.calls.find(isSectionWrite)!.prompt;
+      // The human's footnotes don't follow the recorded Evidence, so the revision is shown the text without them.
+      expect(prompt).toContain("<current-section>\n# A\n\nA returns one. A is fast.\n</current-section>");
+      expect(prompt).toContain("<unsupported-claim>\nA is fast.\n</unsupported-claim>");
+      expect(llm.calls.filter((call) => !isSectionWrite(call)).some((call) => call.prompt.includes("A is fast."))).toBe(false);
+      expect(manifest(repo.dir).sections["modules/src-a"].unsupportedClaims).toEqual(["A is fast."]);
+      expect((await status(repo.dir)).unsupportedClaims).toEqual([{ section: "modules/src-a", text: "A is fast." }]);
+    });
+
+    it("keeps an Unsupported Claim where the revision keeps it, uncited", async () => {
+      const repo = await adoptedThenChanged();
+      const llm = scriptedLlm({ paragraphs: [{ claims: [{ text: "A returns two.", evidence: ["src/a/a.ts#a"] }, { text: "A is fast.", evidence: [] }] }] });
+
+      const result = await update(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, A)).toBe(`# A\n\nA returns two.[^1] A is fast.\n\n${STABLE}[^2]\n\n[^1]: src/a/a.ts (a)\n[^2]: git history of src/a (90 days)\n`);
+      expect(result.droppedClaims).toEqual([]);
+      expect(manifest(repo.dir).sections["modules/src-a"].unsupportedClaims).toEqual(["A is fast."]);
+    });
+
+    it("is left as the human wrote it by generate while it isn't Stale", async () => {
+      const repo = await generated();
+      const mine = "# A\n\nA returns one.[^1] A is fast.\n\n[^1]: my own note\n";
+      repo.commit({ [A]: mine });
+      await adopt(repo.dir, "modules/src-a", {}, {
+        llm: scriptedLlm("unused", { "A is fast.": { confirmed: false, reason: "nothing shows speed" } }, { attachments: { "A returns one.": ["src/a/a.ts#a"] } }),
+      });
+
+      await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A returns one.", evidence: ["src/a/a.ts#a"] }] }] }) });
+
+      expect(read(repo.dir, A)).toBe(mine);
+      expect(manifest(repo.dir).sections["modules/src-a"].unsupportedClaims).toEqual(["A is fast."]);
+    });
+
+    it("shows a Section Scribe wrote since with its footnotes naming the Evidence they cite", async () => {
+      const repo = await adoptedThenChanged();
+      await update(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A returns two.", evidence: ["src/a/a.ts#a"] }] }] }) });
+      repo.commit({ "src/a/a.ts": "export function a() {\n  return 3;\n}\n\nexport const k = 3;\n" }, "change a again");
+      const llm = scriptedLlm({ paragraphs: [{ claims: [{ text: "A returns three.", evidence: ["src/a/a.ts#a"] }] }] });
+
+      await update(repo.dir, {}, { llm });
+
+      expect(llm.calls.find(isSectionWrite)!.prompt).toContain("<current-section>\n# A\n\nA returns two.[^1]\n\nA is fast.\n\n[^1]: src/a/a.ts#a\n</current-section>");
+      expect(read(repo.dir, A)).toContain("A returns three.[^1]\n\nA is fast.\n\n");
+    });
   });
 
   it("refuses a Section whose file is gone, pointing to scribe reset", async () => {
