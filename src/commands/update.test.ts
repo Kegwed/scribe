@@ -255,7 +255,7 @@ describe("update", () => {
 
     expect(result.removed).toEqual([{ section: "modules/src-b", file: B }]);
     expect(read(repo.dir, B)).toBe(before);
-    expect(Object.keys(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections)).toEqual(["modules/src-a", "getting-started", "conventions"]);
+    expect(Object.keys(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections)).toEqual(["modules/src-a", "getting-started", "conventions", "key-decisions"]);
     expect(llm.calls).toEqual([]);
   });
 

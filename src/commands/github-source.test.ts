@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { connectGitHub } from "../github.ts";
-import { MODELS } from "../llm.ts";
+import { KEY_DECISIONS_SYSTEM } from "../key-decisions.ts";
+import { type LlmRequest, MODELS } from "../llm.ts";
 import { type CannedPullRequest, fakeGitHub } from "../test/fake-github.ts";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { type RecordedLlm, recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
@@ -53,7 +54,12 @@ describe("the GitHub Source against recorded responses", () => {
       linkedIssues: [{ number: 7, title: "Uploads fail intermittently", body: "About one upload in fifty fails with a timeout and succeeds when tried again." }],
     }]);
 
-    await generate(repo.dir, {}, { llm: recordedLlm("github"), github });
+    // Key decisions is offered this pull request too; its recorded test is in key-decisions.test.ts.
+    const recorded = recordedLlm("github");
+    const keyDecisions = scriptedLlm({ paragraphs: [] });
+    const llm = { ...recorded, complete: (request: LlmRequest) =>
+      (request.system === KEY_DECISIONS_SYSTEM ? keyDecisions : recorded).complete(request) };
+    await generate(repo.dir, {}, { llm, github });
 
     const section = read(repo.dir, "docs/guide/modules/src-retry.md");
     const footnotes = section.split("\n").filter((line) => line.startsWith("[^"));

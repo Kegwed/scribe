@@ -35,6 +35,7 @@ describe("status", () => {
       { section: "modules/src-b", file: "docs/guide/modules/src-b.md", added: false, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
       { section: "getting-started", file: "docs/guide/getting-started.md", added: false, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
       { section: "conventions", file: "docs/guide/conventions.md", added: false, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
+      { section: "key-decisions", file: "docs/guide/key-decisions.md", added: false, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
     ]);
   });
 
@@ -49,6 +50,7 @@ describe("status", () => {
       expect.objectContaining({ section: "modules/src-b", stale: false }),
       expect.objectContaining({ section: "getting-started", stale: false }),
       expect.objectContaining({ section: "conventions", stale: false }),
+      expect.objectContaining({ section: "key-decisions", stale: false }),
     ]);
   });
 
@@ -58,7 +60,7 @@ describe("status", () => {
 
     const { sections } = await status(repo.dir);
 
-    expect(sections.map((s) => s.stale)).toEqual([false, false, false, false]);
+    expect(sections.map((s) => s.stale)).toEqual([false, false, false, false, false]);
   });
 
   it("reports a Section Stale when a symbol it cites is gone", async () => {
@@ -95,6 +97,7 @@ describe("status", () => {
       expect.objectContaining({ section: "modules/src-b", frozen: false }),
       expect.objectContaining({ section: "getting-started", frozen: false }),
       expect.objectContaining({ section: "conventions", frozen: false }),
+      expect.objectContaining({ section: "key-decisions", frozen: false }),
     ]);
   });
 
@@ -151,6 +154,7 @@ describe("status", () => {
       expect.objectContaining({ section: "modules/src-b", added: false }),
       expect.objectContaining({ section: "getting-started", added: false }),
       expect.objectContaining({ section: "conventions", added: false }),
+      expect.objectContaining({ section: "key-decisions", added: false }),
       { section: "modules/src-c", file: "docs/guide/modules/src-c.md", added: true, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
     ]);
   });
@@ -179,6 +183,7 @@ describe("status", () => {
       expect.objectContaining({ section: "modules/src-b", removed: true }),
       expect.objectContaining({ section: "getting-started", removed: false }),
       expect.objectContaining({ section: "conventions", removed: false }),
+      expect.objectContaining({ section: "key-decisions", removed: false }),
     ]);
   });
 

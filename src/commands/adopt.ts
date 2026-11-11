@@ -2,7 +2,7 @@ import type { Adapters } from "../adapters.ts";
 import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR } from "../manifest.ts";
 import { emptyReport, sectionWriter } from "../section-writer.ts";
-import { clearProposal, openTarget, readSection, guideSection,sectionPath } from "../target.ts";
+import { clearProposal, drawsOnGitHub, openTarget, readSection, guideSection,sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
 
 export interface AdoptOptions {}
@@ -35,7 +35,7 @@ export async function adopt(
   await gitIgnore(repoDir, CACHE_DIR);
 
   const report = emptyReport();
-  const discussions = github && module && (await gitHubEvidence(repoDir, github, [module], report.warnings));
+  const discussions = github && drawsOnGitHub(section, module) ? await gitHubEvidence(repoDir, github, module ? [module] : [], report.warnings) : undefined;
   const unsupported = await sectionWriter(repoDir, target, llm, report, discussions).adopt(section, content);
   const clearedProposal = await clearProposal(repoDir, target.config, section);
   return {
