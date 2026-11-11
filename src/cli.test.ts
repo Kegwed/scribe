@@ -1,6 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { adopt } from "./commands/adopt.ts";
 import { generate } from "./commands/generate.ts";
 import { createFixtureRepo } from "./test/fixture-repo.ts";
 import { scriptedLlm } from "./test/recorded-llm.ts";
@@ -159,6 +160,17 @@ describe("scribe status", () => {
     expect(status).toBe(1);
   });
 
+  it("lists an adopted Section's Unsupported Claims but exits 0", async () => {
+    const repo = await generated();
+    repo.commit({ "docs/guide/modules/src-b.md": "# B\n\nB is fast.\n" });
+    await adopt(repo.dir, "modules/src-b", {}, { llm: scriptedLlm("unused") });
+
+    const { status, stdout } = scribe(repo.dir, "status");
+
+    expect(stdout).toBe("Unsupported Claim in modules/src-b: B is fast.\n");
+    expect(status).toBe(0);
+  });
+
   it("lists the Section of a removed Module and exits non-zero", async () => {
     const repo = await generated();
     repo.commit({ "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }) });
@@ -251,6 +263,56 @@ describe("scribe update", () => {
     ].join("\n"));
     expect(update.status).toBe(0);
     expect(scribe(repo.dir, "status").stdout).toBe("All 2 Sections current.\n");
+  });
+});
+
+describe("scribe adopt and scribe reset", () => {
+  function target() {
+    return createFixtureRepo({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
+      "src/a/a.ts": "export const a = 1;\n",
+    });
+  }
+
+  it("adopt reports the Unsupported Claims it kept and the Proposal it cleared", async () => {
+    const repo = target();
+    await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] }) });
+    repo.commit({ "docs/guide/modules/src-a.md": "# A\n\nA is fast.\n", "docs/guide/modules/src-a.proposal.md": "# A\n\nA is one.\n" });
+    // Adopted once in-process to fill the git-ignored cache, then undone, so the CLI needs no LLM.
+    await adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused") });
+    repo.git("checkout", "--quiet", "--", ".");
+
+    const { status, stdout } = scribe(repo.dir, "adopt", "modules/src-a");
+
+    expect(stdout).toBe([
+      "Unsupported Claim, kept: A is fast.",
+      "Proposal deleted: docs/guide/modules/src-a.proposal.md",
+      "Adopted modules/src-a.",
+      "",
+    ].join("\n"));
+    expect(status).toBe(0);
+  });
+
+  it("reset reports the Section it regenerated", async () => {
+    const repo = target();
+    await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] }) });
+    repo.commit({ "docs/guide/modules/src-a.md": "# A\n\nMy words.\n" });
+
+    // Written from scratch, the requests are the ones generate made, so the cache answers them.
+    const { status, stdout } = scribe(repo.dir, "reset", "modules/src-a");
+
+    expect(stdout).toBe("Reset modules/src-a.\n");
+    expect(status).toBe(0);
+  });
+
+  it("adopt and reset without a Section print usage and exit 1", () => {
+    const repo = target();
+
+    for (const command of ["adopt", "reset"]) {
+      const { status, stderr } = scribe(repo.dir, command);
+      expect(stderr).toMatch(new RegExp(`Usage: scribe ${command} <section>`));
+      expect(status).toBe(1);
+    }
   });
 });
 

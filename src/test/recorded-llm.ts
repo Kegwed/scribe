@@ -45,7 +45,9 @@ export function recordedLlm(name: string, { promptLimit = PROMPT_LIMIT }: { prom
  * A fake for edge cases a live model won't reliably produce. Writes answer with
  * `sections`: a list is used in turn with its last entry repeating, anything else
  * answers every write. The verifier answers from `verdicts`, keyed by a Claim's
- * text, and confirms any Claim not listed. Requests made together are answered
+ * text, and confirms any Claim not listed. Asked which Evidence backs an adopted
+ * Section's Claims, it answers from `attachments`, keyed by a Claim's text, and
+ * attaches no Evidence to any Claim not listed. Requests made together are answered
  * last first, so code that depends on the order answers arrive in fails here.
  * A summary request answers with the summary in `summaries` keyed by the
  * summarised symbol's id, or with a one-line summary naming it. `promptLimit`
@@ -55,7 +57,12 @@ export function recordedLlm(name: string, { promptLimit = PROMPT_LIMIT }: { prom
 export function scriptedLlm(
   sections: unknown,
   verdicts: Record<string, unknown> = {},
-  { promptLimit = PROMPT_LIMIT, summaries = {}, drift = [] }: { promptLimit?: number; summaries?: Record<string, unknown>; drift?: unknown[] } = {},
+  { promptLimit = PROMPT_LIMIT, summaries = {}, attachments = {}, drift = [] }: {
+    promptLimit?: number;
+    summaries?: Record<string, unknown>;
+    attachments?: Record<string, string[]>;
+    drift?: unknown[];
+  } = {},
 ): RecordedLlm {
   const calls: LlmRequest[] = [];
   const writes = Array.isArray(sections) ? sections : [sections];
@@ -73,6 +80,12 @@ export function scriptedLlm(
         }
       });
       if (isSectionWrite(request)) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
+      if ("attachments" in ((request.schema.properties as object | undefined) ?? {})) {
+        const claims = [...request.prompt.matchAll(/<claim index="(\d+)">\n(.*)\n<\/claim>/g)];
+        return asResponseText({
+          attachments: claims.map(([, index, text]) => ({ claim: Number(index), evidence: attachments[text!] ?? [] })),
+        });
+      }
       if (request.system === SUMMARY_SYSTEM) {
         const id = request.prompt.match(/<symbol id="([^"]*)"/)?.[1] ?? "";
         return asResponseText({ summary: id in summaries ? summaries[id] : `Summary of ${id}.` });

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
+import { adopt } from "./adopt.ts";
 import { generate } from "./generate.ts";
 import { status } from "./status.ts";
 import { update } from "./update.ts";
@@ -172,6 +173,16 @@ describe("existing docs as a Source", () => {
       expect(await asked(repo.dir)).toBeGreaterThan(await asked(quiet.dir));
       await generate(repo.dir, {}, { llm: llm() });
       expect((await generate(repo.dir, {}, { llm: llm() })).estimate.tokens).toBe(0);
+    });
+
+    it("keeps reporting Drift once a human's edited Section is adopted", async () => {
+      const repo = createFixtureRepo(CONTRADICTING);
+      await generate(repo.dir, {}, { llm: llm() });
+      repo.commit({ [SECTION]: "# Auth\n\ncreateSession takes a user.\n" });
+
+      await adopt(repo.dir, "modules/src-auth", {}, { llm: llm() });
+
+      expect((await status(repo.dir)).drift).toEqual([{ section: "modules/src-auth", ...DRIFT }]);
     });
 
     it("reports no Drift the verifier can't confirm against both sides", async () => {

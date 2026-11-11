@@ -29,6 +29,8 @@ export interface StatusResult {
   proposals: { section: string; file: string }[];
   /** Where existing docs contradicted the code when Scribe last wrote each Section, as recorded in the manifest. */
   drift: DriftReport[];
+  /** Claims in adopted Sections for which no Evidence was found, as the manifest records them. */
+  unsupportedClaims: { section: string; text: string }[];
 }
 
 /**
@@ -60,7 +62,9 @@ export async function status(repoDir: string): Promise<StatusResult> {
     const frozen = isFrozen(await readSection(repoDir, file), undefined);
     return { section, file, added: !frozen, removed: false, missing: false, frozen, stale: false, changedEvidence: [] };
   }));
-  return { sections: [...recorded, ...unrecorded], proposals: await pendingProposals(repoDir, config), drift: recordedDrift(manifest) };
+  const unsupportedClaims = Object.entries(manifest.sections)
+    .flatMap(([section, record]) => (record.unsupportedClaims ?? []).map((text) => ({ section, text })));
+  return { sections: [...recorded, ...unrecorded], proposals: await pendingProposals(repoDir, config), unsupportedClaims, drift: recordedDrift(manifest) };
 }
 
 /** Every Proposal file in the Guide, including one whose Section's Module has since been removed. */
