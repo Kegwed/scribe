@@ -5,7 +5,7 @@ import { connectGitHub } from "../github.ts";
 import { MODELS } from "../llm.ts";
 import { type CannedPullRequest, fakeGitHub } from "../test/fake-github.ts";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
-import { type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
+import { type RecordedLlm, recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { generate } from "./generate.ts";
 import { status } from "./status.ts";
 import { update } from "./update.ts";
@@ -24,6 +24,46 @@ function read(dir: string, path: string): string {
 function writePrompts(llm: RecordedLlm): string[] {
   return llm.calls.filter((call) => call.model === MODELS.write).map((call) => call.prompt);
 }
+
+describe("the GitHub Source against recorded responses", () => {
+  it("cites review discussion as footnotes linking to GitHub, every Claim cited", async () => {
+    const repo = createFixtureRepo({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "Retry", path: "src/retry" }] }),
+      "src/retry/retry.ts": [
+        "/** Calls `task` until it succeeds, at most `attempts` times. */",
+        "export async function retry<T>(task: () => Promise<T>, attempts = 3): Promise<T> {",
+        "  for (let i = 1; ; i++) {",
+        "    try {",
+        "      return await task();",
+        "    } catch (error) {",
+        "      if (i >= attempts) throw error;",
+        "    }",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    });
+    const github = fakeGitHub([{
+      number: 12,
+      files: ["src/retry/retry.ts"],
+      title: "Retry failed uploads",
+      body: "Uploads to the storage service fail intermittently, so this retries them.",
+      comments: ["Why three attempts by default? Three is what the storage service's own client uses, so we match it."],
+      linkedIssues: [{ number: 7, title: "Uploads fail intermittently", body: "About one upload in fifty fails with a timeout and succeeds when tried again." }],
+    }]);
+
+    await generate(repo.dir, {}, { llm: recordedLlm("github"), github });
+
+    const section = read(repo.dir, "docs/guide/modules/src-retry.md");
+    const footnotes = section.split("\n").filter((line) => line.startsWith("[^"));
+    for (const note of footnotes) {
+      expect(note).toMatch(/^\[\^\d+\]: (?:src\/retry\/retry\.ts \(retry\)|\[(?:PR #12|PR #12, review comment|Issue #7)\]\(https:\/\/github\.com\/acme\/app\/(?:pull|issues)\/\S+\))$/);
+    }
+    expect(footnotes.some((note) => note.includes("](https://github.com/"))).toBe(true);
+    const [, ...prose] = section.split("\n\n").filter((block) => !block.startsWith("[^"));
+    for (const paragraph of prose) expect(paragraph).toMatch(/\[\^\d+\]$/);
+  });
+});
 
 describe("the GitHub Source", () => {
   it("lets a Module Section cite a review comment on a pull request that touched it", async () => {
