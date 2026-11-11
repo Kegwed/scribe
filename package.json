@@ -17,7 +17,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "record": "node scripts/record-cassettes.mjs"
+    "record": "node scripts/record-cassettes.mjs",
+    "eval": "node scripts/eval.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

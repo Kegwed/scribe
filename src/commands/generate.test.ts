@@ -770,6 +770,27 @@ describe("generate", () => {
       ]);
     });
 
+    it("counts each Section's Claims: those first written, those the verifier confirmed of them, and those kept after the repair", async () => {
+      const repo = createFixtureRepo(ONE_MODULE);
+      const llm = scriptedLlm([section("Good.", "Wrong.", "Also wrong."), section("Good.", "Right.", "Still wrong.")], {
+        "Wrong.": { confirmed: false, reason: "a is not a function" },
+        "Also wrong.": { confirmed: false, reason: "a is not a class" },
+        "Still wrong.": { confirmed: false, reason: "a is a number" },
+      });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      expect(result.verifiedClaims).toContainEqual({ section: "modules/src-a", written: 3, confirmed: 1, kept: 2 });
+    });
+
+    it("counts a Section whose Claims all verify first time as all confirmed and kept", async () => {
+      const repo = createFixtureRepo(ONE_MODULE);
+
+      const result = await generate(repo.dir, {}, { llm: scriptedLlm(section("One.", "Two.")) });
+
+      expect(result.verifiedClaims).toContainEqual({ section: "modules/src-a", written: 2, confirmed: 2, kept: 2 });
+    });
+
     it("never writes a Claim without Evidence, even after a repair", async () => {
       const repo = createFixtureRepo(ONE_MODULE);
       const uncited = { paragraphs: [{ claims: [{ text: "Uncited.", evidence: [] }, { text: "Good.", evidence: CITED }] }] };
