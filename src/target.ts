@@ -10,6 +10,7 @@ import { type ChurnEvidence, churnEvidence } from "./git-history.ts";
 import type { FileEvidence } from "./section-writer.ts";
 import { isGitHubEvidence } from "./github.ts";
 import { contentHash } from "./hash.ts";
+import { KEY_DECISIONS } from "./key-decisions.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
 import { detectModules, type Module } from "./modules.ts";
 
@@ -77,11 +78,11 @@ export async function openTarget(repoDir: string): Promise<Target> {
 
 /**
  * Every Section the Guide should have, in the order they are written: one per
- * Module, Getting started, Conventions, then Overview and Architecture, which
- * are built from the Module Sections (ADR-0005).
+ * Module, Getting started, Conventions, Key decisions, then Overview and
+ * Architecture, which are built from the Module Sections (ADR-0005).
  */
 export function guideSections({ sectionIds }: Target): string[] {
-  return [...sectionIds.values(), GETTING_STARTED, CONVENTIONS, ...BOTTOM_UP_SECTIONS];
+  return [...sectionIds.values(), GETTING_STARTED, CONVENTIONS, KEY_DECISIONS, ...BOTTOM_UP_SECTIONS];
 }
 
 /** Every piece of Evidence a Section could cite that Scribe can see change without the network, as it is now. */
@@ -129,6 +130,11 @@ export function guideSection(target: Target, section: string): Module | undefine
     throw new Error(`no Module has the Section ${section}; the Sections are ${guideSections(target).join(", ")}`);
   }
   return [...target.sectionIds].find(([, id]) => id === section)?.[0];
+}
+
+/** Whether a Section cites GitHub Evidence: a Module's Section, whose Module is `module`, or Key decisions. */
+export function drawsOnGitHub(section: string, module: Module | undefined): boolean {
+  return module !== undefined || section === KEY_DECISIONS;
 }
 
 /** Deletes a Section's pending Proposal; returns its repo-relative path, or undefined if there was none. */

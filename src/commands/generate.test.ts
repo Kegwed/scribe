@@ -143,7 +143,7 @@ describe("generate", () => {
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
 
     const { sections } = JSON.parse(read(repo.dir, ".scribe/manifest.json"));
-    expect(Object.keys(sections)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started", "conventions", "overview", "architecture"]);
+    expect(Object.keys(sections)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started", "conventions", "key-decisions", "overview", "architecture"]);
     expect(sections["modules/src-billing"]).toEqual({
       file: "docs/guide/modules/src-billing.md",
       evidence: [{
@@ -180,9 +180,9 @@ describe("generate", () => {
 
       expect(asked).toHaveLength(1);
       const [estimate] = asked;
-      // TARGET has no scripts, CI, docs or lint config, so Getting started and Conventions are written bare and cost nothing.
-      expect(estimate!.sections.map((s) => s.section)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started", "conventions", "overview", "architecture"]);
-      for (const section of [...estimate!.sections.slice(0, 2), ...estimate!.sections.slice(4)]) {
+      // TARGET has no scripts, CI, docs or lint config, so Getting started, Conventions and Key decisions are written bare and cost nothing.
+      expect(estimate!.sections.map((s) => s.section)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started", "conventions", "key-decisions", "overview", "architecture"]);
+      for (const section of [...estimate!.sections.slice(0, 2), ...estimate!.sections.slice(5)]) {
         expect(section.tokens).toBeGreaterThan(0);
         expect(section.dollars).toBeGreaterThan(0);
       }
@@ -402,7 +402,7 @@ describe("generate", () => {
       expect(read(repo.dir, "docs/guide/overview.md")).toBe("# Overview\n\nThe repo greets people.[^1]\n\n[^1]: package.json\n");
       expect(read(repo.dir, "docs/guide/architecture.md")).toBe("# Architecture\n\nA depends on B.[^1]\n\n[^1]: Import graph between Modules\n");
       const { sections } = JSON.parse(read(repo.dir, ".scribe/manifest.json"));
-      expect(Object.keys(sections)).toEqual(["modules/src-a", "modules/src-b", "getting-started", "conventions", "overview", "architecture"]);
+      expect(Object.keys(sections)).toEqual(["modules/src-a", "modules/src-b", "getting-started", "conventions", "key-decisions", "overview", "architecture"]);
       expect(sections.architecture).toEqual({
         file: "docs/guide/architecture.md",
         evidence: [{ id: "graph:imports", hash: expect.any(String) }],

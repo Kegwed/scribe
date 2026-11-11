@@ -2,7 +2,7 @@ import type { Adapters } from "../adapters.ts";
 import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR } from "../manifest.ts";
 import { emptyReport, sectionWriter, type WriteReport } from "../section-writer.ts";
-import { clearProposal, openTarget, readSection, guideSection,sectionPath } from "../target.ts";
+import { clearProposal, drawsOnGitHub, openTarget, readSection, guideSection,sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
 
 export interface ResetOptions {}
@@ -26,7 +26,7 @@ export async function reset(
   const module = guideSection(target, section);
   await gitIgnore(repoDir, CACHE_DIR);
   const result: ResetResult = emptyReport();
-  const discussions = github && module && (await gitHubEvidence(repoDir, github, [module], result.warnings));
+  const discussions = github && drawsOnGitHub(section, module) ? await gitHubEvidence(repoDir, github, module ? [module] : [], result.warnings) : undefined;
 
   const existing = await readSection(repoDir, sectionPath(target.config, section));
   // An adopted record carries Unsupported Claims, so it is replaced even if the text comes out the same.

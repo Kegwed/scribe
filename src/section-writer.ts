@@ -7,8 +7,9 @@ import { CONVENTIONS, conventionsEvidence, hasConventions } from "./conventions.
 import { type DocEvidence, docsAbout } from "./docs.ts";
 import { GETTING_STARTED, unmatchedCommands } from "./getting-started.ts";
 import { CHURN_DAYS, type ChurnEvidence, isChurnEvidence } from "./git-history.ts";
-import { type GitHubEvidence, gitHubRepo } from "./github.ts";
+import { type Discussions, type GitHubEvidence, gitHubRepo, NO_DISCUSSIONS } from "./github.ts";
 import { contentHash } from "./hash.ts";
+import { decisionRecords, KEY_DECISIONS, KEY_DECISIONS_SYSTEM, VERIFY_DECISIONS_SYSTEM } from "./key-decisions.ts";
 import { modelsOf } from "./config.ts";
 import { completeCached, estimateCost, isCached, type Llm, type LlmRequest, readCached } from "./llm.ts";
 import { type DriftRecord, type DriftReport, saveManifest } from "./manifest.ts";
@@ -191,15 +192,16 @@ function notDocsAlone(sent: Evidence[]): boolean {
 }
 
 /**
- * Writes Sections with `llm`. `discussions` holds each Module's GitHub Evidence,
- * keyed by Module path, alongside the code symbols every Module Section draws on.
+ * Writes Sections with `llm`. `discussions` holds the GitHub Evidence each
+ * Module Section draws on alongside its code symbols, and that Key decisions
+ * draws on alongside the ADRs.
  */
 export function sectionWriter(
   repoDir: string,
   target: Target,
   llm: Llm,
   report: WriteReport,
-  discussions: Map<string, GitHubEvidence[]> = new Map(),
+  discussions: Discussions = NO_DISCUSSIONS,
 ): SectionWriter {
   const { config, sectionIds, symbols, churn, setup, docs, repoEvidence, manifest } = target;
   const permalinks = githubPermalinks(repoDir);
@@ -267,9 +269,26 @@ export function sectionWriter(
         uncited: "cites no lint or format config, code or CONTRIBUTING passage",
       };
     }
+    if (section === KEY_DECISIONS) {
+      // The ADRs, then the discussion on the repo's highest-ranked pull requests (ADR-0005).
+      const items: Evidence[] = [...decisionRecords(docs), ...discussions.decisions];
+      return {
+        title: "Key decisions",
+        items,
+        evidence: new Map(items.map((e) => [e.id, e])),
+        // Written from the ADRs and pull request threads alone: docs are this Section's own Evidence.
+        writes: (sent) => sent.length > 0,
+        system: () => KEY_DECISIONS_SYSTEM,
+        verifySystem: () => VERIFY_DECISIONS_SYSTEM,
+        frame: (rendered) => rendered.join("\n\n"),
+        render: renderModuleEvidence,
+        item: "piece of Evidence",
+        uncited: "cites no ADR or pull request thread",
+      };
+    }
     const module = moduleOf(section);
     // A Module's code symbols, then its GitHub Evidence, then the passages of existing docs about it.
-    const discussion = discussions.get(module.path) ?? [];
+    const discussion = discussions.byModule.get(module.path) ?? [];
     const own: Evidence[] = [...moduleSymbols(module), ...discussion, ...docsAbout(module, symbols, docs)];
     return {
       title: module.name,
@@ -440,16 +459,16 @@ export function sectionWriter(
         : summaryCalls.map((request) => parseSummary(readCached(repoDir, request)!)));
       const request = writeRequestFor(about, fitted, fitted.prompt);
       // A Section with no Evidence is written without the LLM; a cached first write means a re-run of work already paid for.
-      const writes = about.writes(fitted.sent);
-      if (uncachedSummaries.length === 0 && (!writes || (!moduleSectionsChange && isCached(repoDir, request)))) {
+      const written = about.writes(fitted.sent);
+      if (uncachedSummaries.length === 0 && (!written || (!moduleSectionsChange && isCached(repoDir, request)))) {
         return { section, tokens: 0, dollars: 0, unpriced: [] };
       }
-      const drift = writes ? driftRequest(section) : undefined;
+      const drift = written ? driftRequest(section) : undefined;
       const costs = [
         ...uncachedSummaries.map((summary) => estimateCost(summary, SUMMARY_OUTPUT_TOKENS)),
         // Only a written Section is searched for Drift; a Proposal never is, so this overstates a Proposal's cost.
         ...(drift && !isCached(repoDir, drift) ? [estimateCost(drift, DRIFT_OUTPUT_TOKENS)] : []),
-        ...(writes ? [
+        ...(written ? [
           estimateCost(request, WRITE_OUTPUT_TOKENS),
           estimateCost(
             { model: models.verify, system: about.verifySystem([]), prompt: about.frame(fitted.sent.map(about.render)), schema: VERDICT_SCHEMA },
