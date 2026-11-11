@@ -12,8 +12,9 @@ import { connectGitHub } from "./github.ts";
 import { claudeLlm } from "./llm.ts";
 import type { DriftReport } from "./manifest.ts";
 import type { Confirm, WriteReport } from "./section-writer.ts";
+import { isModuleSection } from "./target.ts";
 
-const USAGE = "Usage: scribe <command> [--yes]\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules, pending Proposals, Unsupported Claims and Drift between existing docs and the code; exits 1 unless only Frozen Sections, Unsupported Claims or Drift need attention\n  adopt <section>  Take a Frozen Section's text as the new baseline, recording its Evidence and Unsupported Claims\n  reset <section>  Discard a Section's human edits and regenerate it\n\ngenerate and update print a cost estimate and ask before calling the LLM; --yes skips asking.";
+const USAGE = "Usage: scribe <command> [--yes]\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module, then Overview and Architecture from them\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules, pending Proposals, Unsupported Claims and Drift between existing docs and the code; exits 1 unless only Frozen Sections, Unsupported Claims or Drift need attention\n  adopt <section>  Take a Frozen Section's text as the new baseline, recording its Evidence and Unsupported Claims\n  reset <section>  Discard a Section's human edits and regenerate it\n\ngenerate and update print a cost estimate and ask before calling the LLM; --yes skips asking.";
 
 /** Prints a run's estimate, then asks to go ahead unless `yes`; no answer, as when stdin closes, declines. */
 function confirmer(yes: boolean): Confirm {
@@ -111,7 +112,8 @@ async function main(argv: string[]): Promise<number> {
       const { sections, proposals, unsupportedClaims, drift } = await status(process.cwd());
       const attention = sections.filter((s) => s.added || s.removed || s.missing || s.frozen || s.stale);
       for (const { section, added, removed, missing, frozen, stale, changedEvidence } of attention) {
-        const label = added ? "Module added, no Section yet"
+        const label = added && !isModuleSection(section) ? "Not written yet"
+          : added ? "Module added, no Section yet"
           : removed ? "Module removed"
           : missing ? "Missing"
           : frozen && stale ? "Frozen and Stale"

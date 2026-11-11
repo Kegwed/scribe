@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { adopt } from "./commands/adopt.ts";
@@ -38,7 +39,7 @@ describe("scribe generate's cost estimate", () => {
 
     const { status, stdout } = scribeWithInput(repo.dir, "n\n", "generate");
 
-    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 2 Sections, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\n  modules\/src-b  \$\d+\.\d+\n  plus 3 cached Sections at no cost\nContinue\? \[y\/N\] /);
+    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 4 Sections, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\n  modules\/src-b  \$\d+\.\d+\n  overview       \$\d+\.\d+\n  architecture   \$\d+\.\d+\n  plus 3 cached Sections at no cost\nContinue\? \[y\/N\] /);
     expect(stdout).toMatch(/Cancelled; no LLM was called and nothing was written\.\n$/);
     expect(status).toBe(1);
     expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
@@ -89,7 +90,7 @@ describe("scribe status", () => {
 
     const { status, stdout } = scribe(repo.dir, "status");
 
-    expect(stdout).toBe("All 5 Sections current.\n");
+    expect(stdout).toBe("All 7 Sections current.\n");
     expect(status).toBe(0);
   });
 
@@ -145,6 +146,20 @@ describe("scribe status", () => {
     const { status, stdout } = scribe(repo.dir, "status");
 
     expect(stdout).toBe("Missing: modules/src-b\n");
+    expect(status).toBe(1);
+  });
+
+  it("lists a top-level Section the Guide predates as not written yet and exits non-zero", async () => {
+    const repo = await generated();
+    const manifestFile = `${repo.dir}/.scribe/manifest.json`;
+    const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+    delete manifest.sections.architecture;
+    repo.git("rm", "--quiet", "docs/guide/architecture.md");
+    repo.commit({ ".scribe/manifest.json": JSON.stringify(manifest) });
+
+    const { status, stdout } = scribe(repo.dir, "status");
+
+    expect(stdout).toBe("Not written yet: architecture\n");
     expect(status).toBe(1);
   });
 
@@ -262,7 +277,7 @@ describe("scribe update", () => {
       "",
     ].join("\n"));
     expect(update.status).toBe(0);
-    expect(scribe(repo.dir, "status").stdout).toBe("All 4 Sections current.\n");
+    expect(scribe(repo.dir, "status").stdout).toBe("All 6 Sections current.\n");
   });
 });
 

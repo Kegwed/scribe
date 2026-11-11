@@ -39,8 +39,9 @@ function read(dir: string, path: string): string {
   return readFileSync(join(dir, path), "utf8");
 }
 
+/** Prompts of every write but Overview's and Architecture's, which are written last. */
 function writePrompts(llm: RecordedLlm): string[] {
-  return llm.calls.filter((call) => call.model === MODELS.write).map((call) => call.prompt);
+  return llm.calls.filter((call) => call.model === MODELS.write && !call.prompt.startsWith("Section: ")).map((call) => call.prompt);
 }
 
 describe("Key decisions against recorded responses", () => {
@@ -183,7 +184,8 @@ describe("generate: Key decisions", () => {
 
     await generate(repo.dir, {}, { llm });
 
-    expect(llm.calls).toEqual([]);
+    // Overview and Architecture still are, from the Module list.
+    expect(llm.calls.filter((call) => !call.prompt.startsWith("Section: "))).toEqual([]);
     expect(read(repo.dir, SECTION)).toBe("# Key decisions\n");
   });
 

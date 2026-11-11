@@ -52,16 +52,19 @@ export function recordedLlm(name: string, { promptLimit = PROMPT_LIMIT }: { prom
  * A summary request answers with the summary in `summaries` keyed by the
  * summarised symbol's id, or with a one-line summary naming it. `promptLimit`
  * stands in for the writing model's, so small fixtures can exceed it. A search
- * for Drift finds `drift`, by default nothing.
+ * for Drift finds `drift`, by default nothing. Writes of Overview and
+ * Architecture answer from `topLevel`, keyed by title, and default to a
+ * Section with no Claims, so `sections` never scripts them.
  */
 export function scriptedLlm(
   sections: unknown,
   verdicts: Record<string, unknown> = {},
-  { promptLimit = PROMPT_LIMIT, summaries = {}, attachments = {}, drift = [] }: {
+  { promptLimit = PROMPT_LIMIT, summaries = {}, attachments = {}, drift = [], topLevel = {} }: {
     promptLimit?: number;
     summaries?: Record<string, unknown>;
     attachments?: Record<string, string[]>;
     drift?: unknown[];
+    topLevel?: Record<string, unknown>;
   } = {},
 ): RecordedLlm {
   const calls: LlmRequest[] = [];
@@ -79,6 +82,8 @@ export function scriptedLlm(
           setTimeout(() => waiting.splice(0).reverse().forEach((next, i) => setTimeout(next, i * 50)));
         }
       });
+      const title = request.prompt.match(/^Section: (.+)/)?.[1];
+      if (isSectionWrite(request) && title !== undefined) return asResponseText(topLevel[title] ?? { paragraphs: [] });
       if (isSectionWrite(request)) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
       if ("attachments" in ((request.schema.properties as object | undefined) ?? {})) {
         const claims = [...request.prompt.matchAll(/<claim index="(\d+)">\n(.*)\n<\/claim>/g)];

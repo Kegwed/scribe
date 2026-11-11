@@ -29,8 +29,14 @@ function read(dir: string, path: string): string {
   return readFileSync(join(dir, path), "utf8");
 }
 
+/** Requests to write a Module Section. */
 function writes(llm: RecordedLlm) {
-  return llm.calls.filter(isSectionWrite);
+  return llm.calls.filter((call) => isSectionWrite(call) && call.prompt.startsWith("Module: "));
+}
+
+/** Requests to write a top-level Section, by title. */
+function topLevelWrites(llm: RecordedLlm, title: string) {
+  return llm.calls.filter((call) => isSectionWrite(call) && call.prompt.startsWith(`Section: ${title}\n`));
 }
 
 describe("generate", () => {
@@ -46,6 +52,21 @@ describe("generate", () => {
     expect(prose.length).toBeGreaterThan(0);
     for (const paragraph of prose) expect(paragraph).toMatch(/\[\^\d+\]$/);
     expect(existsSync(join(repo.dir, "docs/guide/modules/src-billing.md"))).toBe(true);
+  });
+
+  it("writes Overview and Architecture after them, citing Evidence for every Claim", async () => {
+    const repo = createFixtureRepo(TARGET);
+
+    await generate(repo.dir, {}, { llm: recordedLlm("generate") });
+
+    for (const [file, title] of [["docs/guide/overview.md", "Overview"], ["docs/guide/architecture.md", "Architecture"]] as const) {
+      const content = read(repo.dir, file);
+      expect(content).toMatch(new RegExp(`^# ${title}\\n`));
+      expect(content).toMatch(/^\[\^\d+\]: (?:Modules of the repo|Import graph between Modules|package\.json)$/m);
+      const [, ...prose] = content.split("\n\n").filter((block) => !block.startsWith("[^"));
+      expect(prose.length).toBeGreaterThan(0);
+      for (const paragraph of prose) expect(paragraph).toMatch(/\[\^\d+\]$/);
+    }
   });
 
   it("gives a symbol cited twice one footnote", async () => {
@@ -114,7 +135,7 @@ describe("generate", () => {
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
 
     const { sections } = JSON.parse(read(repo.dir, ".scribe/manifest.json"));
-    expect(Object.keys(sections)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started", "conventions", "key-decisions"]);
+    expect(Object.keys(sections)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started", "conventions", "key-decisions", "overview", "architecture"]);
     expect(sections["modules/src-billing"]).toEqual({
       file: "docs/guide/modules/src-billing.md",
       evidence: [{
@@ -151,17 +172,36 @@ describe("generate", () => {
       expect(asked).toHaveLength(1);
       const [estimate] = asked;
       // TARGET has no scripts, CI, docs or lint config, so Getting started, Conventions and Key decisions are written bare and cost nothing.
-      expect(estimate!.sections.map((s) => s.section)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started", "conventions", "key-decisions"]);
-      for (const section of estimate!.sections.slice(0, 2)) {
+      expect(estimate!.sections.map((s) => s.section)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started", "conventions", "key-decisions", "overview", "architecture"]);
+      for (const section of [...estimate!.sections.slice(0, 2), ...estimate!.sections.slice(5)]) {
         expect(section.tokens).toBeGreaterThan(0);
         expect(section.dollars).toBeGreaterThan(0);
       }
       expect(estimate!.sections[2]).toMatchObject({ tokens: 0, dollars: 0 });
       expect(estimate!.sections[3]).toMatchObject({ tokens: 0, dollars: 0 });
-      expect(estimate!.dollars).toBeCloseTo(estimate!.sections[0]!.dollars + estimate!.sections[1]!.dollars);
+      expect(estimate!.dollars).toBeCloseTo(estimate!.sections.reduce((sum, s) => sum + s.dollars, 0));
       expect(result.declined).toBe(true);
       expect(llm.calls).toEqual([]);
       expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
+    });
+
+    it("estimates Overview and Architecture only once a Module Section they are built from is to be rewritten", async () => {
+      const files: Files = {
+        "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
+        "src/a/a.ts": "export const a = 1;\n",
+      };
+      const repo = createFixtureRepo(files);
+      const topLevel = { Overview: { paragraphs: [{ claims: [{ text: "There is one Module.", evidence: ["graph:modules"] }] }] } };
+      await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] }, {}, { topLevel }) });
+      const costOf = async (section: string) => {
+        const asked: CostEstimate[] = [];
+        await generate(repo.dir, { confirm: async (estimate) => (asked.push(estimate), false) }, { llm: scriptedLlm("unused") });
+        return asked[0]?.sections.find((s) => s.section === section)?.tokens ?? 0;
+      };
+
+      expect(await costOf("overview")).toBe(0);
+      repo.commit({ "src/a/a.ts": "export const a = 2;\n" });
+      expect(await costOf("overview")).toBeGreaterThan(0);
     });
 
     it("writes the Guide once confirmed", async () => {
@@ -269,7 +309,10 @@ describe("generate", () => {
 
     expect(read(repo.dir, "docs/guide/modules/src-auth.md")).toBe("# My words\n");
     expect(result.frozen).toEqual(["modules/src-auth"]);
-    expect(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections).toEqual(before);
+    // Overview and Architecture are built from the Module Sections as they are on disk, the human's words included.
+    const { overview: _o, architecture: _a, ...after } = JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections;
+    const { overview: _ob, architecture: _ab, ...unchanged } = before;
+    expect(after).toEqual(unchanged);
   });
 
   it("treats an existing file Scribe never wrote as Frozen", async () => {
@@ -296,12 +339,12 @@ describe("generate", () => {
     const repo = createFixtureRepo({
       "scribe.config.json": JSON.stringify({ modules: [{ name: "Empty", path: "src/empty" }] }),
     });
-    const llm = recordedLlm("generate");
+    const llm = scriptedLlm("unused");
 
     await generate(repo.dir, {}, { llm });
 
     expect(read(repo.dir, "docs/guide/modules/src-empty.md")).toBe(stableSection("Empty", "src/empty", ""));
-    expect(llm.calls).toEqual([]);
+    expect(writes(llm)).toEqual([]);
   });
 
   it("refuses Modules whose Section files would collide", async () => {
@@ -318,6 +361,101 @@ describe("generate", () => {
     const repo = createFixtureRepo({ "src/index.ts": "export const a = 1;\n" });
 
     await expect(generate(repo.dir, {}, { llm: recordedLlm("generate") })).rejects.toThrow(/scribe init/);
+  });
+
+  describe("Overview and Architecture", () => {
+    const LAYERED: Files = {
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }, { name: "B", path: "src/b" }] }),
+      "package.json": JSON.stringify({ name: "app", description: "Greets people." }),
+      "src/a/a.ts": 'import { b } from "../b/b.ts";\n\nexport const a = b + 1;\n',
+      "src/b/b.ts": "export const b = 1;\n",
+    };
+    const MODULES = [
+      { paragraphs: [{ claims: [{ text: "A adds one to b.", evidence: ["src/a/a.ts#a"] }] }] },
+      { paragraphs: [{ claims: [{ text: "B is one.", evidence: ["src/b/b.ts#b"] }] }] },
+    ];
+    const TOP_LEVEL = {
+      Overview: { paragraphs: [{ claims: [{ text: "The repo greets people.", evidence: ["file:package.json"] }] }] },
+      Architecture: { paragraphs: [{ claims: [{ text: "A depends on B.", evidence: ["graph:imports"] }] }] },
+    };
+
+    it("writes them after the Module Sections, each Claim citing Evidence they draw on directly", async () => {
+      const repo = createFixtureRepo(LAYERED);
+
+      await generate(repo.dir, {}, { llm: scriptedLlm(MODULES, {}, { topLevel: TOP_LEVEL }) });
+
+      expect(read(repo.dir, "docs/guide/overview.md")).toBe("# Overview\n\nThe repo greets people.[^1]\n\n[^1]: package.json\n");
+      expect(read(repo.dir, "docs/guide/architecture.md")).toBe("# Architecture\n\nA depends on B.[^1]\n\n[^1]: Import graph between Modules\n");
+      const { sections } = JSON.parse(read(repo.dir, ".scribe/manifest.json"));
+      expect(Object.keys(sections)).toEqual(["modules/src-a", "modules/src-b", "getting-started", "conventions", "key-decisions", "overview", "architecture"]);
+      expect(sections.architecture).toEqual({
+        file: "docs/guide/architecture.md",
+        evidence: [{ id: "graph:imports", hash: expect.any(String) }],
+        contentHash: sha256(read(repo.dir, "docs/guide/architecture.md")),
+      });
+    });
+
+    it("builds them from the Module Sections' prose, without its citations, and the import graph", async () => {
+      const repo = createFixtureRepo(LAYERED);
+      const llm = scriptedLlm(MODULES, {}, { topLevel: TOP_LEVEL });
+
+      await generate(repo.dir, {}, { llm });
+
+      for (const title of ["Overview", "Architecture"]) {
+        const { prompt } = topLevelWrites(llm, title)[0]!;
+        expect(prompt).toContain("A adds one to b.");
+        expect(prompt).toContain("B is one.");
+        expect(prompt).not.toContain("[^1]");
+      }
+      expect(topLevelWrites(llm, "Architecture")[0]!.prompt).toContain("src/a imports src/b");
+    });
+
+    it("drops a Claim citing a Module's code, which only that Module's Section may cite", async () => {
+      const repo = createFixtureRepo(LAYERED);
+      const llm = scriptedLlm(MODULES, {}, {
+        topLevel: {
+          ...TOP_LEVEL,
+          Overview: { paragraphs: [{ claims: [{ text: "B is one.", evidence: ["src/b/b.ts#b"] }, ...TOP_LEVEL.Overview.paragraphs[0]!.claims] }] },
+        },
+      });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, "docs/guide/overview.md")).toBe("# Overview\n\nThe repo greets people.[^1]\n\n[^1]: package.json\n");
+      expect(result.droppedClaims).toEqual([{ section: "overview", text: "B is one.", reason: expect.stringContaining("no Evidence") }]);
+    });
+
+    it("verifies their Claims, removing and reporting one the repair leaves unconfirmed", async () => {
+      const repo = createFixtureRepo(LAYERED);
+      const llm = scriptedLlm(MODULES, { "A depends on B.": { confirmed: false, reason: "B imports A" } }, { topLevel: TOP_LEVEL });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, "docs/guide/architecture.md")).toBe("# Architecture\n");
+      expect(topLevelWrites(llm, "Architecture")).toHaveLength(2);
+      expect(topLevelWrites(llm, "Architecture")[1]!.prompt).toContain("B imports A");
+      expect(result.droppedClaims).toEqual([{ section: "architecture", text: "A depends on B.", reason: "B imports A" }]);
+    });
+
+    it("cites a SHA-pinned permalink to the root package.json when origin is on GitHub", async () => {
+      const repo = createFixtureRepo(LAYERED);
+      repo.git("remote", "add", "origin", "git@github.com:acme/app.git");
+      const sha = repo.git("rev-parse", "HEAD").trim();
+
+      await generate(repo.dir, {}, { llm: scriptedLlm(MODULES, {}, { topLevel: TOP_LEVEL }) });
+
+      expect(read(repo.dir, "docs/guide/overview.md")).toContain(`[^1]: [package.json](https://github.com/acme/app/blob/${sha}/package.json#L1-L1)\n`);
+      expect(read(repo.dir, "docs/guide/architecture.md")).toContain("[^1]: Import graph between Modules\n");
+    });
+
+    it("never overwrites one a human edited, and reports it Frozen", async () => {
+      const repo = createFixtureRepo({ ...LAYERED, "docs/guide/overview.md": "# Overview\n\nMine.\n" });
+
+      const result = await generate(repo.dir, {}, { llm: scriptedLlm(MODULES, {}, { topLevel: TOP_LEVEL }) });
+
+      expect(read(repo.dir, "docs/guide/overview.md")).toBe("# Overview\n\nMine.\n");
+      expect(result.frozen).toEqual(["overview"]);
+    });
   });
 
   describe("churn", () => {
@@ -465,7 +603,8 @@ describe("generate", () => {
 
       expect(writes(llm)[0]!.prompt).toContain("step39");
       expect(writes(llm)[0]!.system).not.toContain("summarised");
-      expect(llm.calls).toHaveLength(2);
+      // One write and one verdict for the Module; Overview and Architecture are scripted with no Claims.
+      expect(llm.calls.filter((call) => !call.prompt.startsWith("Section: "))).toHaveLength(2);
       expect(result.reduced).toEqual([]);
     });
 

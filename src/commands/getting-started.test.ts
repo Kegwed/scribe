@@ -152,7 +152,8 @@ describe("generate: Getting started", () => {
     await generate(repo.dir, {}, { llm });
 
     expect(read(repo.dir, SECTION)).toBe("# Getting started\n");
-    expect(llm.calls).toEqual([]);
+    // Overview and Architecture still are, from the Module list.
+    expect(llm.calls.filter((call) => !call.prompt.startsWith("Section: "))).toEqual([]);
   });
 
   it("never overwrites a Getting started a human edited, and reports it Frozen", async () => {

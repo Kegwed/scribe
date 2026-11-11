@@ -9,7 +9,10 @@ export interface SectionStatus {
   section: string;
   /** Repo-relative path of the Section's file. */
   file: string;
-  /** The Section's Module was added since Scribe last wrote the Guide, and has no Section yet; `update` writes one. */
+  /**
+   * The Section has never been written: its Module was added since Scribe last
+   * wrote the Guide, or it is a top-level Section the Guide predates; `update` writes it.
+   */
   added: boolean;
   /** The Section's Module no longer exists; `update` drops its record and leaves its file for a human to delete. */
   removed: boolean;
@@ -19,7 +22,7 @@ export interface SectionStatus {
   frozen: boolean;
   /** Evidence the Section cites has changed since Scribe last wrote it. */
   stale: boolean;
-  /** Ids of the cited symbols whose text changed or which no longer exist. */
+  /** Ids of the cited Evidence that changed or no longer exists. */
   changedEvidence: string[];
 }
 
@@ -35,7 +38,7 @@ export interface StatusResult {
 
 /**
  * Reports each Section in the manifest as Stale, Frozen, missing or removed,
- * each Module without one as added, and each pending Proposal, by hashing the Target repo as it is
+ * each Section never written as added, and each pending Proposal, by hashing the Target repo as it is
  * now, and the Drift recorded for each Section. Calls no LLM and no network service.
  */
 export async function status(repoDir: string): Promise<StatusResult> {

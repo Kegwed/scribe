@@ -1,7 +1,7 @@
 import type { Adapters } from "../adapters.ts";
 import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR, isFrozen, recordedDrift, saveManifest } from "../manifest.ts";
-import { type Confirm, confirmed, type CostEstimate, emptyReport, sectionWriter, totalCost, type WriteReport } from "../section-writer.ts";
+import { type Confirm, confirmed, type CostEstimate, emptyReport, estimateRun, sectionWriter, type WriteReport } from "../section-writer.ts";
 import { allEvidence, changedEvidence, guideSections, isRemovedModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
 
@@ -31,7 +31,9 @@ type Planned =
 /**
  * Regenerates each Stale Section a human hasn't edited, keeping the text its
  * changed Evidence doesn't affect, writes a Proposal beside each one a human
- * has, and leaves every other Section untouched.
+ * has, and leaves every other Section untouched. Overview and Architecture are
+ * Stale only when Evidence they cite directly changes, never because a Module
+ * Section they were built from was regenerated (ADR-0005).
  */
 export async function update(
   repoDir: string,
@@ -65,8 +67,8 @@ export async function update(
     planned.push({ kind: "write", section, existing, changed: fromScratch ? undefined : changed });
   }
 
-  const estimate = totalCost(planned.map((p) =>
-    p.kind === "write" ? writer.estimate(p.section, p.existing, p.changed) : writer.estimate(p.section, undefined)));
+  const estimate = estimateRun(writer, planned.map((p) =>
+    p.kind === "write" ? { section: p.section, existing: p.existing, changed: p.changed } : { section: p.section, existing: undefined }));
   if (!(await confirmed(estimate, confirm))) return { ...report, removed: [], proposals: [], estimate, declined: true };
 
   await gitIgnore(repoDir, CACHE_DIR);

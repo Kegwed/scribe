@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { type CodeSymbol, typescriptAnalyser } from "./analyser.ts";
+import { type CodeSymbol, type ModuleImport, typescriptAnalyser } from "./analyser.ts";
 import { CONFIG_FILE, type Config, loadConfig } from "./config.ts";
 import { CONVENTIONS, lintConfigEvidence } from "./conventions.ts";
 import { type DocEvidence, readDocs } from "./docs.ts";
@@ -9,9 +9,36 @@ import { GETTING_STARTED, type SetupEvidence, setupEvidence } from "./getting-st
 import { type ChurnEvidence, churnEvidence } from "./git-history.ts";
 import type { FileEvidence } from "./section-writer.ts";
 import { isGitHubEvidence } from "./github.ts";
+import { contentHash } from "./hash.ts";
 import { KEY_DECISIONS } from "./key-decisions.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
 import { detectModules, type Module } from "./modules.ts";
+
+/**
+ * Evidence about the Target repo as a whole, which Overview and Architecture
+ * cite directly instead of the Module Sections they are built from (ADR-0005).
+ */
+export interface RepoEvidence {
+  /** `graph:<name>` for what Scribe derives from the code, `file:<path>` for a file's content. */
+  id: string;
+  /** Labels the Evidence in its citation. */
+  label: string;
+  text: string;
+  /** Hash of `text`. */
+  hash: string;
+  /** The lines of a file it is, if it is a file's content, which its citation links to. */
+  source?: { file: string; startLine: number; endLine: number };
+}
+
+/** Told apart structurally: GitHub Evidence has a `url`, Evidence in a file a `file`, and this neither. */
+export function isRepoEvidence(item: object): item is RepoEvidence {
+  return "label" in item && !("url" in item) && !("file" in item);
+}
+
+export const OVERVIEW = "overview";
+export const ARCHITECTURE = "architecture";
+/** Written after the Module Sections, from them and the repo-wide Evidence (ADR-0005). */
+export const BOTTOM_UP_SECTIONS = [OVERVIEW, ARCHITECTURE];
 
 /** A Target repo as every command that reads its Guide sees it. */
 export interface Target {
@@ -28,6 +55,8 @@ export interface Target {
   setup: SetupEvidence[];
   /** The lint and format config files the Conventions Section is written from, among other Evidence. */
   lintConfig: FileEvidence[];
+  /** Evidence about the repo as a whole, by id. */
+  repoEvidence: Map<string, RepoEvidence>;
   manifest: Manifest;
 }
 
@@ -37,23 +66,28 @@ export async function openTarget(repoDir: string): Promise<Target> {
   if (!config) throw new Error(`no ${CONFIG_FILE} here; run scribe init first`);
   const modules = config.modules ?? (await detectModules(repoDir));
   const sectionIds = uniqueSectionIds(modules);
-  const { symbols } = await typescriptAnalyser.analyse(repoDir, modules);
+  const { symbols, imports } = await typescriptAnalyser.analyse(repoDir, modules);
   const churn = churnEvidence(repoDir, modules);
   const setup = await setupEvidence(repoDir, config.guideDir);
   const docs = await readDocs(repoDir, config.guideDir);
   const lintConfig = await lintConfigEvidence(repoDir, config.guideDir);
+  const repoEvidence = await repoEvidenceOf(repoDir, modules, imports);
   const manifest = await loadManifest(repoDir);
-  return { config, modules, sectionIds, symbols, churn, setup, docs, lintConfig, manifest };
+  return { config, modules, sectionIds, symbols, churn, setup, docs, lintConfig, repoEvidence, manifest };
 }
 
-/** Every Section the Guide should have: one per Module, then Getting started, Conventions and Key decisions. */
+/**
+ * Every Section the Guide should have, in the order they are written: one per
+ * Module, Getting started, Conventions, Key decisions, then Overview and
+ * Architecture, which are built from the Module Sections (ADR-0005).
+ */
 export function guideSections({ sectionIds }: Target): string[] {
-  return [...sectionIds.values(), GETTING_STARTED, CONVENTIONS, KEY_DECISIONS];
+  return [...sectionIds.values(), GETTING_STARTED, CONVENTIONS, KEY_DECISIONS, ...BOTTOM_UP_SECTIONS];
 }
 
 /** Every piece of Evidence a Section could cite that Scribe can see change without the network, as it is now. */
-export function allEvidence({ symbols, churn, setup, docs, lintConfig }: Target): (FileEvidence | ChurnEvidence)[] {
-  return [...symbols, ...churn.values(), ...setup, ...docs, ...lintConfig];
+export function allEvidence({ symbols, churn, setup, docs, lintConfig, repoEvidence }: Target): (FileEvidence | ChurnEvidence | RepoEvidence)[] {
+  return [...symbols, ...churn.values(), ...setup, ...docs, ...lintConfig, ...repoEvidence.values()];
 }
 
 /** Repo-relative path of a Section's file. */
@@ -113,9 +147,14 @@ export async function clearProposal(repoDir: string, config: Config, section: st
 
 const MODULE_SECTIONS = "modules/";
 
+/** Whether a Section is a Module's, rather than a top-level one. */
+export function isModuleSection(section: string): boolean {
+  return section.startsWith(MODULE_SECTIONS);
+}
+
 /** Whether a recorded Section belongs to a Module that no longer exists; top-level Sections never do. */
 export function isRemovedModuleSection({ sectionIds }: Target, section: string): boolean {
-  return section.startsWith(MODULE_SECTIONS) && ![...sectionIds.values()].includes(section);
+  return isModuleSection(section) && ![...sectionIds.values()].includes(section);
 }
 
 function uniqueSectionIds(modules: Module[]): Map<Module, string> {
@@ -129,4 +168,27 @@ function uniqueSectionIds(modules: Module[]): Map<Module, string> {
     ids.set(module, id);
   }
   return ids;
+}
+
+/** The Module list, the import graph between Modules, and the root package.json if there is one. */
+async function repoEvidenceOf(repoDir: string, modules: Module[], imports: ModuleImport[]): Promise<Map<string, RepoEvidence>> {
+  const items: Omit<RepoEvidence, "hash">[] = [
+    {
+      id: "graph:modules",
+      label: "Modules of the repo",
+      text: modules.map((m) => `${m.name} (${m.path})`).join("\n"),
+    },
+    {
+      id: "graph:imports",
+      label: "Import graph between Modules",
+      text: imports.length > 0 ? imports.map(({ from, to }) => `${from} imports ${to}`).join("\n") : "No Module imports another.",
+    },
+  ];
+  const packageJson = join(repoDir, "package.json");
+  if (existsSync(packageJson)) {
+    const text = (await readFile(packageJson, "utf8")).replace(/\r\n?/g, "\n");
+    const source = { file: "package.json", startLine: 1, endLine: text.trimEnd().split("\n").length };
+    items.push({ id: "file:package.json", label: "package.json", text, source });
+  }
+  return new Map(items.map((item) => [item.id, { ...item, hash: contentHash(item.text) }]));
 }
