@@ -1,0 +1,11 @@
+{
+  "f9dd11a3e04ea58117e996316401da9b75af62d7cb1a858085a49ce61d6d4050": "{\"summary\":\"An internal function that takes a number, computes forty local constants by adding the offsets 0 through 39 to it without using any of them, and returns the number unchanged.\"}",
+  "01ce4e2f6cdd27d4cf1fb005cd85d6ac8aaa05a6ef6fe02dd6968d0bc3f53724": "{\"confirmed\":true,\"reason\":\"run takes a number, calls helper with it and returns helper's result; helper is not exported.\"}",
+  "334bfe7776e833c086ed4f488ab542121b24f0295d8d2d964340fb43a81cf4ec": "{\"confirmed\":true,\"reason\":\"helper ends with return value, and none of its constants change value.\"}",
+  "9810a598b5f2f27720e6122c3a821b1bb4f39776d37a1056e185f6720493c1c1": "{\"confirmed\":true,\"reason\":\"NAMES is exported and lists the forty strings n0 through n39.\"}",
+  "4d3af1531935b3eda4e4ca4528a63600bc1ed8a2fa6ea36550090862dfd9cfff": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The src/a Module exposes run, which takes a number and passes it to the internal helper function, returning its result.\",\"evidence\":[\"src/a/a.ts#run\",\"src/a/a.ts#helper\"]},{\"text\":\"The helper function returns the number it is given unchanged.\",\"evidence\":[\"src/a/a.ts#helper\"]}]},{\"claims\":[{\"text\":\"The Module also exports NAMES, a list of forty strings from n0 to n39.\",\"evidence\":[\"src/a/a.ts#NAMES\"]}]}]}",
+  "11dd52a41a5afb734340b6282573ab0064fad123499d51c0de1616f9955efdd9": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The repository is organised into the Modules listed for it.\",\"evidence\":[\"graph:modules\"]}]}]}",
+  "dc01514f72de948e9c4f00917bc318437dc3d2cca5b96a6a05a7a1dc4bf85940": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The repository is organised into the Modules listed for it.\",\"evidence\":[\"graph:modules\"]},{\"text\":\"The import graph records how the Modules depend on each other.\",\"evidence\":[\"graph:imports\"]}]}]}",
+  "f89bf210faeebba2859e46ec52e46acde8aeb3bdfef1aced19248ef4dd74b69d": "{\"confirmed\":true,\"reason\":\"\"}",
+  "79247359fdc8c4a989d23cd722fed5394c0e6455e7f9c316a11cc9a7cda61df7": "{\"confirmed\":true,\"reason\":\"\"}"
+}

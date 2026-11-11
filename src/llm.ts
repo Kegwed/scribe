@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
@@ -61,11 +61,21 @@ export interface LlmRequest {
 export interface Llm {
   /** The response text, which conforms to the request's schema. */
   complete(request: LlmRequest): Promise<string>;
+  /** The most characters of prompt one request carries; a larger Module is reduced to fit. */
+  promptLimit: number;
 }
+
+/**
+ * A budget, not a measured boundary: about 100k tokens at the usual estimate of
+ * 4 characters a token, leaving the rest of the context window for the system
+ * text, a repair's extra text and the response.
+ */
+export const PROMPT_LIMIT = 400_000;
 
 export function claudeLlm(): Llm {
   const client = new Anthropic();
   return {
+    promptLimit: PROMPT_LIMIT,
     async complete({ model, system, prompt, schema }) {
       const message = await client.beta.messages
         .stream({
@@ -100,6 +110,12 @@ function cacheFile(repoDir: string, request: LlmRequest): string {
 /** Whether the Target repo's cache already answers `request`, so asking costs nothing. */
 export function isCached(repoDir: string, request: LlmRequest): boolean {
   return existsSync(cacheFile(repoDir, request));
+}
+
+/** The cached response to `request`, or undefined; for estimates, which must not wait on the LLM. */
+export function readCached(repoDir: string, request: LlmRequest): string | undefined {
+  const file = cacheFile(repoDir, request);
+  return existsSync(file) ? readFileSync(file, "utf8") : undefined;
 }
 
 /**

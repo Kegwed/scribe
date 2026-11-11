@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type CodeSymbol, type ModuleImport, typescriptAnalyser } from "./analyser.ts";
 import { CONFIG_FILE, type Config, loadConfig } from "./config.ts";
-import { type GitHubEvidence, isGitHubEvidence } from "./github.ts";
+import { GETTING_STARTED, type SetupEvidence, setupEvidence } from "./getting-started.ts";
+import { isGitHubEvidence } from "./github.ts";
 import { contentHash } from "./hash.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
 import { detectModules, type Module } from "./modules.ts";
@@ -15,34 +16,24 @@ import { detectModules, type Module } from "./modules.ts";
 export interface RepoEvidence {
   /** `graph:<name>` for what Scribe derives from the code, `file:<path>` for a file's content. */
   id: string;
-  /** How a citation names it. */
+  /** Labels the Evidence in its citation. */
   label: string;
   text: string;
   /** Hash of `text`. */
   hash: string;
-  /** Repo-relative file it is read from, and the lines it spans, if it is a file's content. */
-  file?: string;
-  startLine?: number;
-  endLine?: number;
+  /** The lines of a file it is, if it is a file's content, which its citation links to. */
+  source?: { file: string; startLine: number; endLine: number };
 }
 
-/** One concrete item a Claim can cite: a code symbol, GitHub discussion, or Evidence about the repo as a whole. */
-export type Evidence = CodeSymbol | GitHubEvidence | RepoEvidence;
-
-export function isCodeSymbol(evidence: Evidence): evidence is CodeSymbol {
-  return "exportedAs" in evidence;
+/** Told apart structurally: GitHub Evidence has a `url`, Evidence in a file a `file`, and this neither. */
+export function isRepoEvidence(item: object): item is RepoEvidence {
+  return "label" in item && !("url" in item) && !("file" in item);
 }
 
-export function isDiscussion(evidence: Evidence): evidence is GitHubEvidence {
-  return "url" in evidence;
-}
-
-/** Sections written after the Module Sections, from them and the repo-wide Evidence (ADR-0005). */
-export const TOP_LEVEL_SECTIONS = ["overview", "architecture"] as const;
-export type TopLevelSection = (typeof TOP_LEVEL_SECTIONS)[number];
-
-/** What a Section is written about: one Module, or the repo as a whole. */
-export type Subject = Module | TopLevelSection;
+export const OVERVIEW = "overview";
+export const ARCHITECTURE = "architecture";
+/** Written after the Module Sections, from them and the repo-wide Evidence (ADR-0005). */
+export const BOTTOM_UP_SECTIONS = [OVERVIEW, ARCHITECTURE];
 
 /** A Target repo as every command that reads its Guide sees it. */
 export interface Target {
@@ -51,35 +42,38 @@ export interface Target {
   /** Each Module's Section id, which is also its file's path in the Guide, without the extension. */
   sectionIds: Map<Module, string>;
   symbols: CodeSymbol[];
+  /** The scripts, CI steps and doc shell blocks the Getting started Section is written from. */
+  setup: SetupEvidence[];
   /** Evidence about the repo as a whole, by id. */
   repoEvidence: Map<string, RepoEvidence>;
   manifest: Manifest;
 }
 
-/** Loads the config, resolves the Modules, analyses their code and loads the manifest. */
+/** Loads the config, resolves the Modules, analyses their code and setup Evidence, and loads the manifest. */
 export async function openTarget(repoDir: string): Promise<Target> {
   const config = await loadConfig(repoDir);
   if (!config) throw new Error(`no ${CONFIG_FILE} here; run scribe init first`);
   const modules = config.modules ?? (await detectModules(repoDir));
   const sectionIds = uniqueSectionIds(modules);
   const { symbols, imports } = await typescriptAnalyser.analyse(repoDir, modules);
+  const setup = await setupEvidence(repoDir, config.guideDir);
   const repoEvidence = await repoEvidenceOf(repoDir, modules, imports);
   const manifest = await loadManifest(repoDir);
-  return { config, modules, sectionIds, symbols, repoEvidence, manifest };
+  return { config, modules, sectionIds, symbols, setup, repoEvidence, manifest };
 }
 
-/** Every Section's subject in the order `generate` writes them: Module Sections first, then the top-level ones (ADR-0005). */
-export function subjects(target: Target): Subject[] {
-  return [...target.modules, ...TOP_LEVEL_SECTIONS];
+/**
+ * Every Section the Guide should have, in the order they are written: one per
+ * Module, Getting started, then Overview and Architecture, which are built
+ * from the Module Sections (ADR-0005).
+ */
+export function guideSections({ sectionIds }: Target): string[] {
+  return [...sectionIds.values(), GETTING_STARTED, ...BOTTOM_UP_SECTIONS];
 }
 
-export function sectionIdOf(target: Target, subject: Subject): string {
-  return typeof subject === "string" ? subject : target.sectionIds.get(subject)!;
-}
-
-/** Every piece of local Evidence a Section could cite, as the Target repo is now. */
-export function localEvidence(target: Target): (CodeSymbol | RepoEvidence)[] {
-  return [...target.symbols, ...target.repoEvidence.values()];
+/** Every piece of Evidence in the Target repo a Section could cite, as it is now. */
+export function allEvidence({ symbols, setup, repoEvidence }: Target): { id: string; hash: string }[] {
+  return [...symbols, ...setup, ...repoEvidence.values()];
 }
 
 /** Repo-relative path of a Section's file. */
@@ -95,12 +89,12 @@ export function proposalPath(config: Config, section: string): string {
 export const PROPOSAL_SUFFIX = ".proposal.md";
 
 /**
- * Ids of the Evidence a Section cites that has changed or no longer exists;
- * the Section is Stale if any. GitHub Evidence never counts: `status` makes no
- * network calls, so it can't see GitHub change.
+ * Ids of the Evidence a Section cites whose text has changed or which no
+ * longer exists; the Section is Stale if any. GitHub Evidence never counts:
+ * `status` makes no network calls, so it can't see GitHub change.
  */
-export function changedEvidence(record: SectionRecord, evidence: (CodeSymbol | RepoEvidence)[]): string[] {
-  const hashes = new Map(evidence.map((e) => [e.id, e.hash]));
+export function changedEvidence(record: SectionRecord, evidence: { id: string; hash: string }[]): string[] {
+  const hashes = new Map(evidence.map((s) => [s.id, s.hash]));
   return record.evidence.filter(({ id, hash }) => !isGitHubEvidence(id) && hashes.get(id) !== hash).map(({ id }) => id);
 }
 
@@ -152,7 +146,8 @@ async function repoEvidenceOf(repoDir: string, modules: Module[], imports: Modul
   const packageJson = join(repoDir, "package.json");
   if (existsSync(packageJson)) {
     const text = (await readFile(packageJson, "utf8")).replace(/\r\n?/g, "\n");
-    items.push({ id: "file:package.json", label: "package.json", text, file: "package.json", startLine: 1, endLine: text.trimEnd().split("\n").length });
+    const source = { file: "package.json", startLine: 1, endLine: text.trimEnd().split("\n").length };
+    items.push({ id: "file:package.json", label: "package.json", text, source });
   }
   return new Map(items.map((item) => [item.id, { ...item, hash: contentHash(item.text) }]));
 }

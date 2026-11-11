@@ -38,7 +38,7 @@ describe("scribe generate's cost estimate", () => {
 
     const { status, stdout } = scribeWithInput(repo.dir, "n\n", "generate");
 
-    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 4 Sections, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\n  modules\/src-b  \$\d+\.\d+\n  overview       \$\d+\.\d+\n  architecture   \$\d+\.\d+\nContinue\? \[y\/N\] /);
+    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 4 Sections, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\n  modules\/src-b  \$\d+\.\d+\n  overview       \$\d+\.\d+\n  architecture   \$\d+\.\d+\n  plus 1 cached Section at no cost\nContinue\? \[y\/N\] /);
     expect(stdout).toMatch(/Cancelled; no LLM was called and nothing was written\.\n$/);
     expect(status).toBe(1);
     expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
@@ -89,7 +89,7 @@ describe("scribe status", () => {
 
     const { status, stdout } = scribe(repo.dir, "status");
 
-    expect(stdout).toBe("All 4 Sections current.\n");
+    expect(stdout).toBe("All 5 Sections current.\n");
     expect(status).toBe(0);
   });
 
@@ -185,6 +185,27 @@ describe("scribe status", () => {
   });
 });
 
+describe("scribe generate", () => {
+  it("says which Modules were reduced to fit one writing request, and how", async () => {
+    const huge = Array.from({ length: 20_000 }, (_, i) => `  const step${i} = value + ${i};`).join("\n");
+    const repo = createFixtureRepo({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
+      "src/a/a.ts": `export const a = 1;\n\nfunction huge(value: number) {\n${huge}\n  return value;\n}\n`,
+    });
+    // Answered once in-process and cached, so the CLI's run makes no LLM call.
+    await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] }) });
+
+    const { status, stdout } = scribe(repo.dir, "generate");
+
+    expect(stdout).toBe([
+      "Reduced to fit one writing request: modules/src-a (left out: src/a/a.ts#huge)",
+      "Guide generated.",
+      "",
+    ].join("\n"));
+    expect(status).toBe(0);
+  });
+});
+
 describe("scribe update", () => {
   it("reports a removed Module's Section, after which status is clean", async () => {
     const repo = createFixtureRepo({
@@ -208,7 +229,7 @@ describe("scribe update", () => {
       "",
     ].join("\n"));
     expect(update.status).toBe(0);
-    expect(scribe(repo.dir, "status").stdout).toBe("All 3 Sections current.\n");
+    expect(scribe(repo.dir, "status").stdout).toBe("All 4 Sections current.\n");
   });
 });
 

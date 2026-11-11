@@ -1,18 +1,8 @@
 import type { Adapters } from "../adapters.ts";
 import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR, isFrozen, saveManifest } from "../manifest.ts";
-import { type Confirm, type CostEstimate, confirmed, emptyReport, estimateRun, sectionWriter, type WriteReport } from "../section-writer.ts";
-import {
-  changedEvidence,
-  isRemovedModuleSection,
-  localEvidence,
-  openTarget,
-  readSection,
-  sectionIdOf,
-  sectionPath,
-  type Subject,
-  subjects,
-} from "../target.ts";
+import { type Confirm, confirmed, type CostEstimate, emptyReport, estimateRun, sectionWriter, type WriteReport } from "../section-writer.ts";
+import { allEvidence, changedEvidence, guideSections, isRemovedModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
 
 export interface UpdateOptions {
@@ -35,8 +25,8 @@ export interface UpdateResult extends WriteReport {
 }
 
 type Planned =
-  | { kind: "write"; subject: Subject; existing: string | undefined; changed: string[] | undefined }
-  | { kind: "propose"; subject: Subject };
+  | { kind: "write"; section: string; existing: string | undefined; changed: string[] | undefined }
+  | { kind: "propose"; section: string };
 
 /**
  * Regenerates each Stale Section a human hasn't edited, keeping the text its
@@ -60,10 +50,9 @@ export async function update(
     .filter(([section]) => isRemovedModuleSection(target, section))
     .map(([section, { file }]) => ({ section, file }));
 
-  const evidence = localEvidence(target);
+  const evidence = allEvidence(target);
   const planned: Planned[] = [];
-  for (const subject of subjects(target)) {
-    const section = sectionIdOf(target, subject);
+  for (const section of guideSections(target)) {
     const record = sections[section];
     const existing = await readSection(repoDir, sectionPath(target.config, section));
     const changed = record ? changedEvidence(record, evidence) : [];
@@ -71,27 +60,25 @@ export async function update(
     if (!fromScratch && changed.length === 0) continue;
     if (isFrozen(existing, record)) {
       // Only a recorded Section can be Stale: one Scribe never wrote cites no Evidence to have changed.
-      if (record && changed.length > 0) planned.push({ kind: "propose", subject });
+      if (record && changed.length > 0) planned.push({ kind: "propose", section });
       else report.frozen.push(section);
       continue;
     }
-    planned.push({ kind: "write", subject, existing, changed: fromScratch ? undefined : changed });
+    planned.push({ kind: "write", section, existing, changed: fromScratch ? undefined : changed });
   }
 
-  const estimate = await estimateRun(writer, planned.map((p) =>
-    p.kind === "write" ? { subject: p.subject, existing: p.existing, changed: p.changed } : { subject: p.subject, existing: undefined }));
+  const estimate = estimateRun(writer, planned.map((p) =>
+    p.kind === "write" ? { section: p.section, existing: p.existing, changed: p.changed } : { section: p.section, existing: undefined }));
   if (!(await confirmed(estimate, confirm))) return { ...report, removed: [], proposals: [], estimate, declined: true };
 
   await gitIgnore(repoDir, CACHE_DIR);
   for (const { section } of removed) delete sections[section];
   if (removed.length > 0) await saveManifest(repoDir, target.manifest);
 
-  // In order: Module Sections first, so a top-level Section is written from them as updated.
   const proposals: UpdateResult["proposals"] = [];
   for (const p of planned) {
-    const section = sectionIdOf(target, p.subject);
-    if (p.kind === "propose") proposals.push({ section, file: await writer.propose(p.subject) });
-    else await writer.write(p.subject, p.existing, p.changed);
+    if (p.kind === "propose") proposals.push({ section: p.section, file: await writer.propose(p.section) });
+    else await writer.write(p.section, p.existing, p.changed);
   }
   return { ...report, removed, proposals, estimate, declined: false };
 }

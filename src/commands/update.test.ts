@@ -237,7 +237,7 @@ describe("update", () => {
 
     expect(result.removed).toEqual([{ section: "modules/src-b", file: B }]);
     expect(read(repo.dir, B)).toBe(before);
-    expect(Object.keys(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections)).toEqual(["modules/src-a", "overview", "architecture"]);
+    expect(Object.keys(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections)).toEqual(["modules/src-a", "getting-started", "overview", "architecture"]);
     expect(llm.calls).toEqual([]);
   });
 
@@ -341,7 +341,7 @@ describe("update", () => {
     expect(llm.calls).toEqual([]);
     expect(repo.git("status", "--porcelain")).toBe("");
     expect(result).toEqual({
-      droppedClaims: [], frozen: [], warnings: [], removed: [], proposals: [],
+      droppedClaims: [], frozen: [], reduced: [], warnings: [], removed: [], proposals: [],
       estimate: { sections: [], tokens: 0, dollars: 0, unpriced: [] }, declined: false,
     });
   });
@@ -360,7 +360,7 @@ describe("update", () => {
     /** Generates and commits the Guide, with Overview citing the Module list and Architecture the import graph. */
     async function layered() {
       const repo = createFixtureRepo(TARGET);
-      await generate(repo.dir, {}, { llm: scriptedLlm(MODULES, {}, { Overview: OVERVIEW_CLAIMS, Architecture: NO_IMPORTS }) });
+      await generate(repo.dir, {}, { llm: scriptedLlm(MODULES, {}, { topLevel: { Overview: OVERVIEW_CLAIMS, Architecture: NO_IMPORTS } }) });
       repo.commit({}, "generate the Guide");
       return repo;
     }
@@ -371,8 +371,7 @@ describe("update", () => {
       const before = [read(repo.dir, OVERVIEW), read(repo.dir, ARCHITECTURE)];
       repo.commit({ "src/a/a.ts": "export function a() {\n  return 2;\n}\n\nexport const k = 3;\n" });
       const llm = scriptedLlm({ paragraphs: [{ claims: [{ text: "A returns two.", evidence: ["src/a/a.ts#a"] }] }] }, {}, {
-        Overview: "unused",
-        Architecture: "unused",
+        topLevel: { Overview: "unused", Architecture: "unused" },
       });
 
       await update(repo.dir, {}, { llm });
@@ -388,8 +387,7 @@ describe("update", () => {
       const overview = read(repo.dir, OVERVIEW);
       repo.commit(addImport);
       const llm = scriptedLlm({ paragraphs: [{ claims: [{ text: "B is k minus two.", evidence: ["src/b/b.ts#b"] }] }] }, {}, {
-        Overview: "unused",
-        Architecture: B_IMPORTS_A,
+        topLevel: { Overview: "unused", Architecture: B_IMPORTS_A },
       });
 
       await update(repo.dir, {}, { llm });
@@ -409,7 +407,7 @@ describe("update", () => {
       const repo = await layered();
       repo.commit({ ...addImport, [ARCHITECTURE]: "# Architecture\n\nMine.\n" });
       const llm = scriptedLlm({ paragraphs: [{ claims: [{ text: "B is k minus two.", evidence: ["src/b/b.ts#b"] }] }] }, {}, {
-        Architecture: B_IMPORTS_A,
+        topLevel: { Architecture: B_IMPORTS_A },
       });
 
       const result = await update(repo.dir, {}, { llm });
@@ -426,7 +424,7 @@ describe("update", () => {
       delete manifest.sections.architecture;
       repo.git("rm", "--quiet", OVERVIEW, ARCHITECTURE);
       repo.commit({ ".scribe/manifest.json": JSON.stringify(manifest) });
-      const llm = scriptedLlm("unused", {}, { Overview: OVERVIEW_CLAIMS, Architecture: NO_IMPORTS });
+      const llm = scriptedLlm("unused", {}, { topLevel: { Overview: OVERVIEW_CLAIMS, Architecture: NO_IMPORTS } });
 
       await update(repo.dir, {}, { llm });
 
@@ -440,5 +438,56 @@ describe("update", () => {
     const repo = createFixtureRepo({ "src/index.ts": "export const a = 1;\n" });
 
     await expect(update(repo.dir, {}, { llm: scriptedLlm("unused") })).rejects.toThrow(/scribe init/);
+  });
+
+  describe("a Module too large for one writing request", () => {
+    const LIMIT = 1500;
+    const large = (offset: number): Files => ({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
+      "src/a/a.ts": [
+        "export function run(value: number) {",
+        "  return helper(value);",
+        "}",
+        "",
+        "function helper(value: number) {",
+        ...Array.from({ length: 40 }, (_, i) => `  const step${i} = value + ${i + offset};`),
+        "  return value;",
+        "}",
+        "",
+        `export const NAMES = [${Array.from({ length: 40 }, (_, i) => `"n${i}"`).join(", ")}];`,
+        "",
+      ].join("\n"),
+    });
+    const CLAIM = { paragraphs: [{ claims: [{ text: "Run delegates to a helper.", evidence: ["src/a/a.ts#run", "src/a/a.ts#helper"] }] }] };
+
+    async function generatedLarge() {
+      const repo = createFixtureRepo(large(0));
+      await generate(repo.dir, {}, { llm: scriptedLlm(CLAIM, {}, { promptLimit: LIMIT }) });
+      repo.commit(large(1), "change the helper");
+      return repo;
+    }
+
+    it("revises its Stale Section from summaries, within the limit and with the Section's current text", async () => {
+      const repo = await generatedLarge();
+      const llm = scriptedLlm(CLAIM, {}, { promptLimit: LIMIT });
+
+      const result = await update(repo.dir, {}, { llm });
+
+      const [revision] = writes(llm);
+      expect(revision!.prompt.length).toBeLessThanOrEqual(LIMIT);
+      expect(revision!.prompt).toContain("Run delegates to a helper.");
+      expect(revision!.prompt).toContain('<changed id="src/a/a.ts#helper" status="changed"/>');
+      expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: [] }]);
+    });
+
+    it("reports the reduction as the Proposal's when the Section is Frozen", async () => {
+      const repo = await generatedLarge();
+      repo.commit({ [A]: "# A\n\nMy words.\n" });
+
+      const result = await update(repo.dir, {}, { llm: scriptedLlm(CLAIM, {}, { promptLimit: LIMIT }) });
+
+      expect(read(repo.dir, A_PROPOSAL)).toContain("Run delegates to a helper.");
+      expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: [], proposal: true }]);
+    });
   });
 });

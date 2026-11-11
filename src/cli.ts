@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 import type { Adapters } from "./adapters.ts";
 import { connectGitHub } from "./github.ts";
 import { claudeLlm } from "./llm.ts";
-import type { Confirm } from "./section-writer.ts";
+import type { Confirm, WriteReport } from "./section-writer.ts";
 import { isModuleSection } from "./target.ts";
 
 const USAGE = "Usage: scribe <command> [--yes]\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module, then Overview and Architecture from them\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules and pending Proposals; exits 1 unless only Frozen Sections need attention\n\ngenerate and update print a cost estimate and ask before calling the LLM; --yes skips asking.";
@@ -74,20 +74,22 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "generate": {
-      const { declined, droppedClaims, frozen, warnings } = await generate(process.cwd(), { confirm: confirmer(yes) }, adapters());
+      const { declined, droppedClaims, frozen, reduced, warnings } = await generate(process.cwd(), { confirm: confirmer(yes) }, adapters());
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
       if (declined) return cancelled();
+      printReduced(reduced);
       for (const { section, text, reason } of droppedClaims) console.log(`Dropped from ${section}: ${text} (${reason})`);
       console.log("Guide generated.");
       return 0;
     }
     case "update": {
-      const { declined, droppedClaims, frozen, proposals, removed, warnings } = await update(process.cwd(), { confirm: confirmer(yes) }, adapters());
+      const { declined, droppedClaims, frozen, proposals, reduced, removed, warnings } = await update(process.cwd(), { confirm: confirmer(yes) }, adapters());
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
       if (declined) return cancelled();
       for (const { section, file } of proposals) console.log(`Frozen and Stale, Proposal written: ${section}; merge ${file} into it by hand, then delete it.`);
+      printReduced(reduced);
       for (const { section, text, reason, proposal } of droppedClaims) {
         console.log(`Dropped from ${proposal ? `the Proposal for ${section}` : section}: ${text} (${reason})`);
       }
@@ -116,6 +118,16 @@ async function main(argv: string[]): Promise<number> {
     default:
       console.error(USAGE);
       return command === undefined || command === "--help" ? 0 : 1;
+  }
+}
+
+function printReduced(reduced: WriteReport["reduced"]) {
+  for (const { section, summarised, leftOut, proposal } of reduced) {
+    const how = [
+      ...(summarised.length > 0 ? [`summarised: ${summarised.join(", ")}`] : []),
+      ...(leftOut.length > 0 ? [`left out: ${leftOut.join(", ")}`] : []),
+    ].join("; ");
+    console.log(`Reduced to fit one writing request: ${proposal ? `the Proposal for ${section}` : section} (${how})`);
   }
 }
 

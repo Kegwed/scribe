@@ -24,19 +24,21 @@ async function generated(files: Files = TARGET) {
   return repo;
 }
 
-async function moduleSections(dir: string) {
-  return (await status(dir)).sections.filter((s) => s.section.startsWith("modules/"));
+/** Every Section's status but Overview's and Architecture's, which have their own tests below. */
+async function sectionsBelowTop(dir: string) {
+  return (await status(dir)).sections.filter((s) => s.section !== "overview" && s.section !== "architecture");
 }
 
 describe("status", () => {
   it("reports every Module Section current right after generate", async () => {
     const repo = await generated();
 
-    const sections = await moduleSections(repo.dir);
+    const sections = await sectionsBelowTop(repo.dir);
 
     expect(sections).toEqual([
       { section: "modules/src-a", file: "docs/guide/modules/src-a.md", added: false, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
       { section: "modules/src-b", file: "docs/guide/modules/src-b.md", added: false, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
+      { section: "getting-started", file: "docs/guide/getting-started.md", added: false, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
     ]);
   });
 
@@ -44,11 +46,12 @@ describe("status", () => {
     const repo = await generated();
     repo.commit({ "src/a/a.ts": "export function a() {\n  return 2;\n}\n" });
 
-    const sections = await moduleSections(repo.dir);
+    const sections = await sectionsBelowTop(repo.dir);
 
     expect(sections).toEqual([
       expect.objectContaining({ section: "modules/src-a", frozen: false, stale: true, changedEvidence: ["src/a/a.ts#a"] }),
       expect.objectContaining({ section: "modules/src-b", stale: false }),
+      expect.objectContaining({ section: "getting-started", stale: false }),
     ]);
   });
 
@@ -56,16 +59,16 @@ describe("status", () => {
     const repo = await generated();
     repo.commit({ "src/a/a.ts": `import { b } from "../b/b.ts";\n\n${TARGET["src/a/a.ts"]}\nexport const c = b;\n` });
 
-    const sections = await moduleSections(repo.dir);
+    const sections = await sectionsBelowTop(repo.dir);
 
-    expect(sections.map((s) => s.stale)).toEqual([false, false]);
+    expect(sections.map((s) => s.stale)).toEqual([false, false, false]);
   });
 
   it("reports a Section Stale when a symbol it cites is gone", async () => {
     const repo = await generated();
     repo.commit({ "src/b/b.ts": "export const renamed = 1;\n" });
 
-    const sections = await moduleSections(repo.dir);
+    const sections = await sectionsBelowTop(repo.dir);
 
     expect(sections[1]).toMatchObject({ section: "modules/src-b", stale: true, changedEvidence: ["src/b/b.ts#b"] });
   });
@@ -74,11 +77,12 @@ describe("status", () => {
     const repo = await generated();
     repo.commit({ "docs/guide/modules/src-a.md": "# A\n\nMy words.\n" });
 
-    const sections = await moduleSections(repo.dir);
+    const sections = await sectionsBelowTop(repo.dir);
 
     expect(sections).toEqual([
       expect.objectContaining({ section: "modules/src-a", frozen: true, stale: false }),
       expect.objectContaining({ section: "modules/src-b", frozen: false }),
+      expect.objectContaining({ section: "getting-started", frozen: false }),
     ]);
   });
 
@@ -86,7 +90,7 @@ describe("status", () => {
     const repo = await generated();
     repo.commit({ "docs/guide/modules/src-a.md": "# A\n\nMy words.\n", "src/a/a.ts": "export function a() {\n  return 2;\n}\n" });
 
-    const sections = await moduleSections(repo.dir);
+    const sections = await sectionsBelowTop(repo.dir);
 
     expect(sections[0]).toMatchObject({ section: "modules/src-a", frozen: true, stale: true });
   });
@@ -128,11 +132,12 @@ describe("status", () => {
       "src/c/c.ts": "export const c = 1;\n",
     });
 
-    const sections = await moduleSections(repo.dir);
+    const sections = await sectionsBelowTop(repo.dir);
 
     expect(sections).toEqual([
       expect.objectContaining({ section: "modules/src-a", added: false }),
       expect.objectContaining({ section: "modules/src-b", added: false }),
+      expect.objectContaining({ section: "getting-started", added: false }),
       { section: "modules/src-c", file: "docs/guide/modules/src-c.md", added: true, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
     ]);
   });
@@ -144,9 +149,9 @@ describe("status", () => {
       "docs/guide/modules/src-c.md": "# C\n\nMine.\n",
     });
 
-    const sections = await moduleSections(repo.dir);
+    const sections = await sectionsBelowTop(repo.dir);
 
-    expect(sections[2]).toMatchObject({ section: "modules/src-c", added: false, frozen: true });
+    expect(sections.find((s) => s.section === "modules/src-c")).toMatchObject({ added: false, frozen: true });
   });
 
   it("reports the Section of a removed Module", async () => {
@@ -154,11 +159,12 @@ describe("status", () => {
     repo.git("rm", "--quiet", "-r", "src/b");
     repo.commit({ "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }) });
 
-    const sections = await moduleSections(repo.dir);
+    const sections = await sectionsBelowTop(repo.dir);
 
     expect(sections).toEqual([
       expect.objectContaining({ section: "modules/src-a", removed: false }),
       expect.objectContaining({ section: "modules/src-b", removed: true }),
+      expect.objectContaining({ section: "getting-started", removed: false }),
     ]);
   });
 
@@ -176,14 +182,16 @@ describe("status", () => {
           { paragraphs: [{ claims: [{ text: "A returns one.", evidence: ["src/a/a.ts#a"] }] }] },
           { paragraphs: [{ claims: [{ text: "B is one.", evidence: ["src/b/b.ts#b"] }] }] },
         ], {}, {
-          Overview: { paragraphs: [{ claims: [{ text: "The repo counts, in Modules A and B.", evidence: ["file:package.json", "graph:modules"] }] }] },
-          Architecture: { paragraphs: [{ claims: [{ text: "No Module imports another.", evidence: ["graph:imports"] }] }] },
+          topLevel: {
+            Overview: { paragraphs: [{ claims: [{ text: "The repo counts, in Modules A and B.", evidence: ["file:package.json", "graph:modules"] }] }] },
+            Architecture: { paragraphs: [{ claims: [{ text: "No Module imports another.", evidence: ["graph:imports"] }] }] },
+          },
         }),
       });
       repo.commit({}, "generate the Guide");
       return repo;
     }
-    const topLevel = async (dir: string) => (await status(dir)).sections.filter((s) => !s.section.startsWith("modules/"));
+    const topLevel = async (dir: string) => (await status(dir)).sections.filter((s) => s.section === "overview" || s.section === "architecture");
 
     it("reports them current right after generate", async () => {
       const repo = await layered();
@@ -198,7 +206,7 @@ describe("status", () => {
       const repo = await layered();
       repo.commit({ "src/a/a.ts": "export function a() {\n  return 2;\n}\n" });
 
-      const sections = await moduleSections(repo.dir);
+      const sections = await sectionsBelowTop(repo.dir);
 
       expect(sections.find((s) => s.section === "modules/src-a")).toMatchObject({ stale: true });
       expect((await topLevel(repo.dir)).map((s) => s.stale)).toEqual([false, false]);
