@@ -3,6 +3,7 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type CodeSymbol, type ModuleImport, typescriptAnalyser } from "./analyser.ts";
 import { CONFIG_FILE, type Config, loadConfig } from "./config.ts";
+import { CONVENTIONS, lintConfigEvidence } from "./conventions.ts";
 import { type DocEvidence, readDocs } from "./docs.ts";
 import { GETTING_STARTED, type SetupEvidence, setupEvidence } from "./getting-started.ts";
 import { type ChurnEvidence, churnEvidence } from "./git-history.ts";
@@ -51,6 +52,8 @@ export interface Target {
   docs: DocEvidence[];
   /** The scripts, CI steps and doc shell blocks the Getting started Section is written from. */
   setup: SetupEvidence[];
+  /** The lint and format config files the Conventions Section is written from, among other Evidence. */
+  lintConfig: FileEvidence[];
   /** Evidence about the repo as a whole, by id. */
   repoEvidence: Map<string, RepoEvidence>;
   manifest: Manifest;
@@ -66,23 +69,24 @@ export async function openTarget(repoDir: string): Promise<Target> {
   const churn = churnEvidence(repoDir, modules);
   const setup = await setupEvidence(repoDir, config.guideDir);
   const docs = await readDocs(repoDir, config.guideDir);
+  const lintConfig = await lintConfigEvidence(repoDir, config.guideDir);
   const repoEvidence = await repoEvidenceOf(repoDir, modules, imports);
   const manifest = await loadManifest(repoDir);
-  return { config, modules, sectionIds, symbols, churn, setup, docs, repoEvidence, manifest };
+  return { config, modules, sectionIds, symbols, churn, setup, docs, lintConfig, repoEvidence, manifest };
 }
 
 /**
  * Every Section the Guide should have, in the order they are written: one per
- * Module, Getting started, then Overview and Architecture, which are built
- * from the Module Sections (ADR-0005).
+ * Module, Getting started, Conventions, then Overview and Architecture, which
+ * are built from the Module Sections (ADR-0005).
  */
 export function guideSections({ sectionIds }: Target): string[] {
-  return [...sectionIds.values(), GETTING_STARTED, ...BOTTOM_UP_SECTIONS];
+  return [...sectionIds.values(), GETTING_STARTED, CONVENTIONS, ...BOTTOM_UP_SECTIONS];
 }
 
 /** Every piece of Evidence a Section could cite that Scribe can see change without the network, as it is now. */
-export function allEvidence({ symbols, churn, setup, docs, repoEvidence }: Target): (FileEvidence | ChurnEvidence | RepoEvidence)[] {
-  return [...symbols, ...churn.values(), ...setup, ...docs, ...repoEvidence.values()];
+export function allEvidence({ symbols, churn, setup, docs, lintConfig, repoEvidence }: Target): (FileEvidence | ChurnEvidence | RepoEvidence)[] {
+  return [...symbols, ...churn.values(), ...setup, ...docs, ...lintConfig, ...repoEvidence.values()];
 }
 
 /** Repo-relative path of a Section's file. */
