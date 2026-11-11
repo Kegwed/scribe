@@ -116,8 +116,7 @@ describe("existing docs as a Source", () => {
       expect((await status(repo.dir)).drift).toEqual([{ section: "modules/src-auth", ...DRIFT }]);
     });
 
-    // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-    it.skip("finds Drift, and writes a Section that may cite the docs, with recorded responses", async () => {
+    it("finds Drift, and writes a Section that may cite the docs, with recorded responses", async () => {
       const repo = createFixtureRepo(CONTRADICTING);
 
       const result = await generate(repo.dir, {}, { llm: recordedLlm("existing-docs") });

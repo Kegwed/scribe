@@ -68,8 +68,7 @@ describe("update against recorded responses", () => {
   const PRICING_SECTION = "docs/guide/modules/src-pricing.md";
   const GREETING_SECTION = "docs/guide/modules/src-greeting.md";
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("revises the Stale Section, keeping the Claim on the symbol that didn't change", async () => {
+  it("revises the Stale Section, keeping the Claim on the symbol that didn't change", async () => {
     const repo = createFixtureRepo(PRICING);
     await generate(repo.dir, {}, { llm: recordedLlm("update") });
     repo.commit({}, "generate the Guide");

@@ -28,8 +28,7 @@ function writePrompts(llm: RecordedLlm): string[] {
 }
 
 describe("the GitHub Source against recorded responses", () => {
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("cites review discussion as footnotes linking to GitHub, every Claim cited", async () => {
+  it("cites review discussion as footnotes linking to GitHub, every Claim cited", async () => {
     const repo = createFixtureRepo({
       "scribe.config.json": JSON.stringify({ modules: [{ name: "Retry", path: "src/retry" }] }),
       "src/retry/retry.ts": [

@@ -40,8 +40,7 @@ function topLevelWrites(llm: RecordedLlm, title: string) {
 }
 
 describe("generate", () => {
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("writes one Section per Module, citing Evidence for every Claim", async () => {
+  it("writes one Section per Module, citing Evidence for every Claim", async () => {
     const repo = createFixtureRepo(TARGET);
 
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
@@ -55,8 +54,7 @@ describe("generate", () => {
     expect(existsSync(join(repo.dir, "docs/guide/modules/src-billing.md"))).toBe(true);
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("writes Overview and Architecture after them, citing Evidence for every Claim", async () => {
+  it("writes Overview and Architecture after them, citing Evidence for every Claim", async () => {
     const repo = createFixtureRepo(TARGET);
 
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
@@ -82,8 +80,7 @@ describe("generate", () => {
     expect(read(repo.dir, "docs/guide/modules/src-a.md")).toBe(stableSection("src/a", "src/a", "One.[^1] Two.[^1]", ["[^1]: src/a/a.ts (a)"]));
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("writes the Guide to the configured directory", async () => {
+  it("writes the Guide to the configured directory", async () => {
     const repo = createFixtureRepo({ ...TARGET, "scribe.config.json": JSON.stringify({ guideDir: "handbook" }) });
 
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
@@ -91,8 +88,7 @@ describe("generate", () => {
     expect(existsSync(join(repo.dir, "handbook/modules/src-auth.md"))).toBe(true);
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("cites SHA-pinned permalinks with the current line range when origin is on GitHub", async () => {
+  it("cites SHA-pinned permalinks with the current line range when origin is on GitHub", async () => {
     const repo = createFixtureRepo(TARGET);
     repo.git("remote", "add", "origin", "git@github.com:acme/app.git");
     const sha = repo.git("rev-parse", "HEAD").trim();
@@ -105,8 +101,7 @@ describe("generate", () => {
     expect(result.warnings).toEqual([]);
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("understands https GitHub origins", async () => {
+  it("understands https GitHub origins", async () => {
     const repo = createFixtureRepo(TARGET);
     repo.git("remote", "add", "origin", "https://github.com/acme/app.git");
 
@@ -115,8 +110,7 @@ describe("generate", () => {
     expect(read(repo.dir, "docs/guide/modules/src-auth.md")).toContain("(https://github.com/acme/app/blob/");
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("cites repo-relative paths when origin is elsewhere", async () => {
+  it("cites repo-relative paths when origin is elsewhere", async () => {
     const repo = createFixtureRepo(TARGET);
     repo.git("remote", "add", "origin", "https://gitlab.com/acme/github.com.git");
 
@@ -125,8 +119,7 @@ describe("generate", () => {
     expect(read(repo.dir, "docs/guide/modules/src-auth.md")).toContain(": src/auth/session.ts (createSession)");
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("warns when a permalink's file differs from the pinned commit", async () => {
+  it("warns when a permalink's file differs from the pinned commit", async () => {
     const repo = createFixtureRepo(TARGET);
     repo.git("remote", "add", "origin", "git@github.com:acme/app.git");
     writeFileSync(join(repo.dir, "src/billing/invoice.ts"), `// uncommitted\n${TARGET["src/billing/invoice.ts"]}`);
@@ -136,8 +129,7 @@ describe("generate", () => {
     expect(result.warnings).toEqual([expect.stringContaining("src/billing/invoice.ts")]);
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("records each Section's Evidence hashes and written-content hash in the manifest", async () => {
+  it("records each Section's Evidence hashes and written-content hash in the manifest", async () => {
     const repo = createFixtureRepo(TARGET);
 
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
@@ -157,8 +149,7 @@ describe("generate", () => {
     });
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("makes no LLM calls when re-run with unchanged inputs", async () => {
+  it("makes no LLM calls when re-run with unchanged inputs", async () => {
     const repo = createFixtureRepo(TARGET);
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
     const before = read(repo.dir, "docs/guide/modules/src-auth.md");
@@ -213,8 +204,7 @@ describe("generate", () => {
       expect(await costOf("overview")).toBeGreaterThan(0);
     });
 
-    // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-    it.skip("writes the Guide once confirmed", async () => {
+    it("writes the Guide once confirmed", async () => {
       const repo = createFixtureRepo(TARGET);
 
       const result = await generate(repo.dir, { confirm: async () => true }, { llm: recordedLlm("generate") });
@@ -234,8 +224,7 @@ describe("generate", () => {
       expect(asked[0]!.dollars).toBeGreaterThan(0);
     });
 
-    // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-    it.skip("estimates a fully cached run at zero, without asking", async () => {
+    it("estimates a fully cached run at zero, without asking", async () => {
       const repo = createFixtureRepo(TARGET);
       await generate(repo.dir, {}, { llm: recordedLlm("generate") });
       let asked = false;
@@ -248,8 +237,7 @@ describe("generate", () => {
     });
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("never caches a response it can't use", async () => {
+  it("never caches a response it can't use", async () => {
     const repo = createFixtureRepo(TARGET);
     await expect(generate(repo.dir, {}, { llm: scriptedLlm("not json") })).rejects.toThrow();
 
@@ -259,8 +247,7 @@ describe("generate", () => {
     expect(writes(llm).length).toBeGreaterThanOrEqual(2);
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("never caches a response whose Claims are malformed", async () => {
+  it("never caches a response whose Claims are malformed", async () => {
     const repo = createFixtureRepo(TARGET);
     await expect(generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{}] }) })).rejects.toThrow(/malformed/);
 
@@ -270,8 +257,7 @@ describe("generate", () => {
     expect(writes(llm).length).toBeGreaterThanOrEqual(2);
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("git-ignores the cache even when the config was written by hand", async () => {
+  it("git-ignores the cache even when the config was written by hand", async () => {
     const repo = createFixtureRepo(TARGET);
 
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
@@ -279,8 +265,7 @@ describe("generate", () => {
     expect(repo.git("status", "--porcelain", "--untracked-files=all")).not.toContain(".scribe/cache/");
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("leaves a Section as it is when only HEAD has moved since it was written", async () => {
+  it("leaves a Section as it is when only HEAD has moved since it was written", async () => {
     const repo = createFixtureRepo(TARGET);
     repo.git("remote", "add", "origin", "git@github.com:acme/app.git");
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
@@ -313,8 +298,7 @@ describe("generate", () => {
     expect(result.droppedClaims).toContainEqual({ section: "modules/src-a", text: "Invented.", reason: expect.any(String) });
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("never overwrites a Section a human edited, and reports it Frozen", async () => {
+  it("never overwrites a Section a human edited, and reports it Frozen", async () => {
     const repo = createFixtureRepo(TARGET);
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
     const { sections: before } = JSON.parse(read(repo.dir, ".scribe/manifest.json"));
@@ -328,8 +312,7 @@ describe("generate", () => {
     expect(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections).toEqual(before);
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("treats an existing file Scribe never wrote as Frozen", async () => {
+  it("treats an existing file Scribe never wrote as Frozen", async () => {
     const repo = createFixtureRepo({ ...TARGET, "docs/guide/modules/src-auth.md": "# Already here\n" });
 
     const result = await generate(repo.dir, {}, { llm: recordedLlm("generate") });
@@ -338,8 +321,7 @@ describe("generate", () => {
     expect(result.frozen).toEqual(["modules/src-auth"]);
   });
 
-  // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-  it.skip("doesn't Freeze a Section whose line endings a checkout changed", async () => {
+  it("doesn't Freeze a Section whose line endings a checkout changed", async () => {
     const repo = createFixtureRepo(TARGET);
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
     const file = join(repo.dir, "docs/guide/modules/src-auth.md");
@@ -533,8 +515,7 @@ describe("generate", () => {
       );
     });
 
-    // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-    it.skip("names no commit author anywhere in the Guide", async () => {
+    it("names no commit author anywhere in the Guide", async () => {
       const repo = createFixtureRepo(TARGET);
       repo.git("config", "user.name", "Ada Lovelace");
       repo.git("config", "user.email", "ada@example.com");
@@ -594,8 +575,7 @@ describe("generate", () => {
       expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: [] }]);
     });
 
-    // Skipped: its cassette has no Overview and Architecture recordings yet; re-record with npm run record, then unskip.
-    it.skip("against recorded responses, writes a cited Section from summaries and records its Evidence", async () => {
+    it("against recorded responses, writes a cited Section from summaries and records its Evidence", async () => {
       const repo = createFixtureRepo(LARGE);
       const llm = recordedLlm("reduce", { promptLimit: LIMIT });
 
