@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { generate } from "./commands/generate.ts";
@@ -40,7 +41,7 @@ describe("scribe status", () => {
 
     const { status, stdout } = scribe(repo.dir, "status");
 
-    expect(stdout).toBe("All 2 Sections current.\n");
+    expect(stdout).toBe("All 4 Sections current.\n");
     expect(status).toBe(0);
   });
 
@@ -99,6 +100,20 @@ describe("scribe status", () => {
     expect(status).toBe(1);
   });
 
+  it("lists a top-level Section the Guide predates as not written yet and exits non-zero", async () => {
+    const repo = await generated();
+    const manifestFile = `${repo.dir}/.scribe/manifest.json`;
+    const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+    delete manifest.sections.architecture;
+    repo.git("rm", "--quiet", "docs/guide/architecture.md");
+    repo.commit({ ".scribe/manifest.json": JSON.stringify(manifest) });
+
+    const { status, stdout } = scribe(repo.dir, "status");
+
+    expect(stdout).toBe("Not written yet: architecture\n");
+    expect(status).toBe(1);
+  });
+
   it("lists a Module added since generate as needing a Section and exits non-zero", async () => {
     const repo = await generated();
     repo.commit({
@@ -145,7 +160,7 @@ describe("scribe update", () => {
       "",
     ].join("\n"));
     expect(update.status).toBe(0);
-    expect(scribe(repo.dir, "status").stdout).toBe("All 1 Section current.\n");
+    expect(scribe(repo.dir, "status").stdout).toBe("All 3 Sections current.\n");
   });
 });
 

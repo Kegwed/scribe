@@ -43,10 +43,16 @@ export function recordedLlm(name: string): RecordedLlm {
  * A fake for edge cases a live model won't reliably produce. Writes answer with
  * `sections`: a list is used in turn with its last entry repeating, anything else
  * answers every write. The verifier answers from `verdicts`, keyed by a Claim's
- * text, and confirms any Claim not listed. Requests made together are answered
- * last first, so code that depends on the order answers arrive in fails here.
+ * text, and confirms any Claim not listed. Writes of a top-level Section answer
+ * from `topLevel`, keyed by its title, and default to a Section with no Claims,
+ * so `sections` scripts only the Module Sections. Requests made together are
+ * answered last first, so code that depends on the order answers arrive in fails here.
  */
-export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown> = {}): RecordedLlm {
+export function scriptedLlm(
+  sections: unknown,
+  verdicts: Record<string, unknown> = {},
+  topLevel: Record<string, unknown> = {},
+): RecordedLlm {
   const calls: LlmRequest[] = [];
   const writes = Array.isArray(sections) ? sections : [sections];
   let written = 0;
@@ -61,6 +67,8 @@ export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown>
           setTimeout(() => waiting.splice(0).reverse().forEach((next, i) => setTimeout(next, i * 50)));
         }
       });
+      const title = request.prompt.match(/^Section: (.+)/)?.[1];
+      if (request.model === MODELS.write && title !== undefined) return asResponseText(topLevel[title] ?? { paragraphs: [] });
       if (request.model === MODELS.write) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
       const claim = Object.keys(verdicts).find((key) => request.prompt.includes(key));
       return asResponseText(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);

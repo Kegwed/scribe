@@ -10,7 +10,7 @@ export const MANIFEST_PATH = `${SCRIBE_DIR}/manifest.json`;
 export const CACHE_DIR = `${SCRIBE_DIR}/cache/`;
 
 export interface EvidenceRecord {
-  /** The cited symbol's id. */
+  /** The cited Evidence's id: a symbol's `<file>#<name>`, or a `graph:` or `file:` id for repo-wide Evidence. */
   id: string;
   hash: string;
 }

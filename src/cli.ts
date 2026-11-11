@@ -5,8 +5,9 @@ import { status } from "./commands/status.ts";
 import { update } from "./commands/update.ts";
 import { CONFIG_FILE } from "./config.ts";
 import { claudeLlm } from "./llm.ts";
+import { isModuleSection } from "./target.ts";
 
-const USAGE = "Usage: scribe <command>\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules and pending Proposals; exits 1 unless only Frozen Sections need attention";
+const USAGE = "Usage: scribe <command>\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module, then Overview and Architecture from them\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules and pending Proposals; exits 1 unless only Frozen Sections need attention";
 
 async function main(argv: string[]): Promise<number> {
   const [command] = argv;
@@ -48,7 +49,8 @@ async function main(argv: string[]): Promise<number> {
       const { sections, proposals } = await status(process.cwd());
       const attention = sections.filter((s) => s.added || s.removed || s.missing || s.frozen || s.stale);
       for (const { section, added, removed, missing, frozen, stale, changedEvidence } of attention) {
-        const label = added ? "Module added, no Section yet"
+        const label = added && !isModuleSection(section) ? "Not written yet"
+          : added ? "Module added, no Section yet"
           : removed ? "Module removed"
           : missing ? "Missing"
           : frozen && stale ? "Frozen and Stale"

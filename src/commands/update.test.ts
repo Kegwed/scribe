@@ -27,8 +27,14 @@ function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
+/** Requests to write a Module Section. */
 function writes(llm: RecordedLlm) {
-  return llm.calls.filter((call) => call.model === MODELS.write);
+  return llm.calls.filter((call) => call.model === MODELS.write && call.prompt.startsWith("Module: "));
+}
+
+/** Requests to write a top-level Section, by title. */
+function topLevelWrites(llm: RecordedLlm, title: string) {
+  return llm.calls.filter((call) => call.model === MODELS.write && call.prompt.startsWith(`Section: ${title}\n`));
 }
 
 /** Generates and commits the Guide: A with two Claims citing a and k, B with one citing b. */
@@ -169,7 +175,7 @@ describe("update", () => {
 
     expect(result.removed).toEqual([{ section: "modules/src-b", file: B }]);
     expect(read(repo.dir, B)).toBe(before);
-    expect(Object.keys(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections)).toEqual(["modules/src-a"]);
+    expect(Object.keys(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections)).toEqual(["modules/src-a", "overview", "architecture"]);
     expect(llm.calls).toEqual([]);
   });
 
@@ -273,6 +279,96 @@ describe("update", () => {
     expect(llm.calls).toEqual([]);
     expect(repo.git("status", "--porcelain")).toBe("");
     expect(result).toEqual({ droppedClaims: [], frozen: [], warnings: [], removed: [], proposals: [] });
+  });
+
+  describe("Overview and Architecture", () => {
+    const OVERVIEW = "docs/guide/overview.md";
+    const ARCHITECTURE = "docs/guide/architecture.md";
+    const MODULES = [
+      { paragraphs: [{ claims: [{ text: "A returns one.", evidence: ["src/a/a.ts#a"] }] }] },
+      { paragraphs: [{ claims: [{ text: "B is one.", evidence: ["src/b/b.ts#b"] }] }] },
+    ];
+    const OVERVIEW_CLAIMS = { paragraphs: [{ claims: [{ text: "The repo has Modules A and B.", evidence: ["graph:modules"] }] }] };
+    const NO_IMPORTS = { paragraphs: [{ claims: [{ text: "No Module imports another.", evidence: ["graph:imports"] }] }] };
+    const B_IMPORTS_A = { paragraphs: [{ claims: [{ text: "B imports A.", evidence: ["graph:imports"] }] }] };
+
+    /** Generates and commits the Guide, with Overview citing the Module list and Architecture the import graph. */
+    async function layered() {
+      const repo = createFixtureRepo(TARGET);
+      await generate(repo.dir, {}, { llm: scriptedLlm(MODULES, {}, { Overview: OVERVIEW_CLAIMS, Architecture: NO_IMPORTS }) });
+      repo.commit({}, "generate the Guide");
+      return repo;
+    }
+    const addImport = { "src/b/b.ts": 'import { k } from "../a/a.ts";\n\nexport const b = k - 2;\n' };
+
+    it("leaves them as they are when only a symbol inside a Module changes", async () => {
+      const repo = await layered();
+      const before = [read(repo.dir, OVERVIEW), read(repo.dir, ARCHITECTURE)];
+      repo.commit({ "src/a/a.ts": "export function a() {\n  return 2;\n}\n\nexport const k = 3;\n" });
+      const llm = scriptedLlm({ paragraphs: [{ claims: [{ text: "A returns two.", evidence: ["src/a/a.ts#a"] }] }] }, {}, {
+        Overview: "unused",
+        Architecture: "unused",
+      });
+
+      await update(repo.dir, {}, { llm });
+
+      expect(writes(llm)).toHaveLength(1);
+      expect(topLevelWrites(llm, "Overview")).toEqual([]);
+      expect(topLevelWrites(llm, "Architecture")).toEqual([]);
+      expect([read(repo.dir, OVERVIEW), read(repo.dir, ARCHITECTURE)]).toEqual(before);
+    });
+
+    it("revises Architecture alone when an import between Modules is added, from its current text and the change", async () => {
+      const repo = await layered();
+      const overview = read(repo.dir, OVERVIEW);
+      repo.commit(addImport);
+      const llm = scriptedLlm({ paragraphs: [{ claims: [{ text: "B is k minus two.", evidence: ["src/b/b.ts#b"] }] }] }, {}, {
+        Overview: "unused",
+        Architecture: B_IMPORTS_A,
+      });
+
+      await update(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, ARCHITECTURE)).toBe("# Architecture\n\nB imports A.[^1]\n\n[^1]: Import graph between Modules\n");
+      expect(read(repo.dir, OVERVIEW)).toBe(overview);
+      expect(topLevelWrites(llm, "Overview")).toEqual([]);
+      expect(topLevelWrites(llm, "Architecture")).toHaveLength(1);
+      const { prompt } = topLevelWrites(llm, "Architecture")[0]!;
+      expect(prompt).toContain("<current-section>\n# Architecture\n\nNo Module imports another.[^1]\n\n[^1]: graph:imports\n</current-section>");
+      expect(prompt).toContain('<changed id="graph:imports" status="changed"/>');
+      expect(prompt).toContain("src/b imports src/a");
+      expect((await status(repo.dir)).sections.filter((s) => s.stale)).toEqual([]);
+    });
+
+    it("writes a Proposal beside a Frozen Architecture when an import is added", async () => {
+      const repo = await layered();
+      repo.commit({ ...addImport, [ARCHITECTURE]: "# Architecture\n\nMine.\n" });
+      const llm = scriptedLlm({ paragraphs: [{ claims: [{ text: "B is k minus two.", evidence: ["src/b/b.ts#b"] }] }] }, {}, {
+        Architecture: B_IMPORTS_A,
+      });
+
+      const result = await update(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, ARCHITECTURE)).toBe("# Architecture\n\nMine.\n");
+      expect(read(repo.dir, "docs/guide/architecture.proposal.md")).toBe("# Architecture\n\nB imports A.[^1]\n\n[^1]: Import graph between Modules\n");
+      expect(result.proposals).toEqual([{ section: "architecture", file: "docs/guide/architecture.proposal.md" }]);
+    });
+
+    it("writes them for a Guide generated before they existed", async () => {
+      const repo = await layered();
+      const manifest = JSON.parse(read(repo.dir, ".scribe/manifest.json"));
+      delete manifest.sections.overview;
+      delete manifest.sections.architecture;
+      repo.git("rm", "--quiet", OVERVIEW, ARCHITECTURE);
+      repo.commit({ ".scribe/manifest.json": JSON.stringify(manifest) });
+      const llm = scriptedLlm("unused", {}, { Overview: OVERVIEW_CLAIMS, Architecture: NO_IMPORTS });
+
+      await update(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, OVERVIEW)).toBe("# Overview\n\nThe repo has Modules A and B.[^1]\n\n[^1]: Modules of the repo\n");
+      expect(read(repo.dir, ARCHITECTURE)).toBe("# Architecture\n\nNo Module imports another.[^1]\n\n[^1]: Import graph between Modules\n");
+      expect(writes(llm)).toEqual([]);
+    });
   });
 
   it("asks for scribe init when the repo has no config", async () => {

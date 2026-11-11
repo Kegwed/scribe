@@ -27,8 +27,14 @@ function read(dir: string, path: string): string {
   return readFileSync(join(dir, path), "utf8");
 }
 
+/** Requests to write a Module Section. */
 function writes(llm: RecordedLlm) {
-  return llm.calls.filter((call) => call.model === MODELS.write);
+  return llm.calls.filter((call) => call.model === MODELS.write && call.prompt.startsWith("Module: "));
+}
+
+/** Requests to write a top-level Section, by title. */
+function topLevelWrites(llm: RecordedLlm, title: string) {
+  return llm.calls.filter((call) => call.model === MODELS.write && call.prompt.startsWith(`Section: ${title}\n`));
 }
 
 describe("generate", () => {
@@ -44,6 +50,21 @@ describe("generate", () => {
     expect(prose.length).toBeGreaterThan(0);
     for (const paragraph of prose) expect(paragraph).toMatch(/\[\^\d+\]$/);
     expect(existsSync(join(repo.dir, "docs/guide/modules/src-billing.md"))).toBe(true);
+  });
+
+  it("writes Overview and Architecture after them, citing Evidence for every Claim", async () => {
+    const repo = createFixtureRepo(TARGET);
+
+    await generate(repo.dir, {}, { llm: recordedLlm("generate") });
+
+    for (const [file, title] of [["docs/guide/overview.md", "Overview"], ["docs/guide/architecture.md", "Architecture"]] as const) {
+      const content = read(repo.dir, file);
+      expect(content).toMatch(new RegExp(`^# ${title}\\n`));
+      expect(content).toMatch(/^\[\^\d+\]: (?:Modules of the repo|Import graph between Modules|package\.json)$/m);
+      const [, ...prose] = content.split("\n\n").filter((block) => !block.startsWith("[^"));
+      expect(prose.length).toBeGreaterThan(0);
+      for (const paragraph of prose) expect(paragraph).toMatch(/\[\^\d+\]$/);
+    }
   });
 
   it("gives a symbol cited twice one footnote", async () => {
@@ -112,7 +133,7 @@ describe("generate", () => {
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
 
     const { sections } = JSON.parse(read(repo.dir, ".scribe/manifest.json"));
-    expect(Object.keys(sections)).toEqual(["modules/src-auth", "modules/src-billing"]);
+    expect(Object.keys(sections)).toEqual(["modules/src-auth", "modules/src-billing", "overview", "architecture"]);
     expect(sections["modules/src-billing"]).toEqual({
       file: "docs/guide/modules/src-billing.md",
       evidence: [{
@@ -234,12 +255,12 @@ describe("generate", () => {
     const repo = createFixtureRepo({
       "scribe.config.json": JSON.stringify({ modules: [{ name: "Empty", path: "src/empty" }] }),
     });
-    const llm = recordedLlm("generate");
+    const llm = scriptedLlm("unused");
 
     await generate(repo.dir, {}, { llm });
 
     expect(read(repo.dir, "docs/guide/modules/src-empty.md")).toBe("# Empty\n");
-    expect(llm.calls).toEqual([]);
+    expect(writes(llm)).toEqual([]);
   });
 
   it("refuses Modules whose Section files would collide", async () => {
@@ -256,6 +277,99 @@ describe("generate", () => {
     const repo = createFixtureRepo({ "src/index.ts": "export const a = 1;\n" });
 
     await expect(generate(repo.dir, {}, { llm: recordedLlm("generate") })).rejects.toThrow(/scribe init/);
+  });
+
+  describe("Overview and Architecture", () => {
+    const LAYERED: Files = {
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }, { name: "B", path: "src/b" }] }),
+      "package.json": JSON.stringify({ name: "app", description: "Greets people." }),
+      "src/a/a.ts": 'import { b } from "../b/b.ts";\n\nexport const a = b + 1;\n',
+      "src/b/b.ts": "export const b = 1;\n",
+    };
+    const MODULES = [
+      { paragraphs: [{ claims: [{ text: "A adds one to b.", evidence: ["src/a/a.ts#a"] }] }] },
+      { paragraphs: [{ claims: [{ text: "B is one.", evidence: ["src/b/b.ts#b"] }] }] },
+    ];
+    const TOP_LEVEL = {
+      Overview: { paragraphs: [{ claims: [{ text: "The repo greets people.", evidence: ["file:package.json"] }] }] },
+      Architecture: { paragraphs: [{ claims: [{ text: "A depends on B.", evidence: ["graph:imports"] }] }] },
+    };
+
+    it("writes them after the Module Sections, each Claim citing Evidence they draw on directly", async () => {
+      const repo = createFixtureRepo(LAYERED);
+
+      await generate(repo.dir, {}, { llm: scriptedLlm(MODULES, {}, TOP_LEVEL) });
+
+      expect(read(repo.dir, "docs/guide/overview.md")).toBe("# Overview\n\nThe repo greets people.[^1]\n\n[^1]: package.json\n");
+      expect(read(repo.dir, "docs/guide/architecture.md")).toBe("# Architecture\n\nA depends on B.[^1]\n\n[^1]: Import graph between Modules\n");
+      const { sections } = JSON.parse(read(repo.dir, ".scribe/manifest.json"));
+      expect(Object.keys(sections)).toEqual(["modules/src-a", "modules/src-b", "overview", "architecture"]);
+      expect(sections.architecture).toEqual({
+        file: "docs/guide/architecture.md",
+        evidence: [{ id: "graph:imports", hash: expect.any(String) }],
+        contentHash: sha256(read(repo.dir, "docs/guide/architecture.md")),
+      });
+    });
+
+    it("builds them from the Module Sections' prose, without its citations, and the import graph", async () => {
+      const repo = createFixtureRepo(LAYERED);
+      const llm = scriptedLlm(MODULES, {}, TOP_LEVEL);
+
+      await generate(repo.dir, {}, { llm });
+
+      for (const title of ["Overview", "Architecture"]) {
+        const { prompt } = topLevelWrites(llm, title)[0]!;
+        expect(prompt).toContain("A adds one to b.");
+        expect(prompt).toContain("B is one.");
+        expect(prompt).not.toContain("[^1]");
+      }
+      expect(topLevelWrites(llm, "Architecture")[0]!.prompt).toContain("src/a imports src/b");
+    });
+
+    it("drops a Claim citing a Module's code, which only that Module's Section may cite", async () => {
+      const repo = createFixtureRepo(LAYERED);
+      const llm = scriptedLlm(MODULES, {}, {
+        ...TOP_LEVEL,
+        Overview: { paragraphs: [{ claims: [{ text: "B is one.", evidence: ["src/b/b.ts#b"] }, ...TOP_LEVEL.Overview.paragraphs[0]!.claims] }] },
+      });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, "docs/guide/overview.md")).toBe("# Overview\n\nThe repo greets people.[^1]\n\n[^1]: package.json\n");
+      expect(result.droppedClaims).toEqual([{ section: "overview", text: "B is one.", reason: expect.stringContaining("no Evidence") }]);
+    });
+
+    it("verifies their Claims, removing and reporting one the repair leaves unconfirmed", async () => {
+      const repo = createFixtureRepo(LAYERED);
+      const llm = scriptedLlm(MODULES, { "A depends on B.": { confirmed: false, reason: "B imports A" } }, TOP_LEVEL);
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      expect(read(repo.dir, "docs/guide/architecture.md")).toBe("# Architecture\n");
+      expect(topLevelWrites(llm, "Architecture")).toHaveLength(2);
+      expect(topLevelWrites(llm, "Architecture")[1]!.prompt).toContain("B imports A");
+      expect(result.droppedClaims).toEqual([{ section: "architecture", text: "A depends on B.", reason: "B imports A" }]);
+    });
+
+    it("cites a SHA-pinned permalink to the root package.json when origin is on GitHub", async () => {
+      const repo = createFixtureRepo(LAYERED);
+      repo.git("remote", "add", "origin", "git@github.com:acme/app.git");
+      const sha = repo.git("rev-parse", "HEAD").trim();
+
+      await generate(repo.dir, {}, { llm: scriptedLlm(MODULES, {}, TOP_LEVEL) });
+
+      expect(read(repo.dir, "docs/guide/overview.md")).toContain(`[^1]: [package.json](https://github.com/acme/app/blob/${sha}/package.json#L1-L1)\n`);
+      expect(read(repo.dir, "docs/guide/architecture.md")).toContain("[^1]: Import graph between Modules\n");
+    });
+
+    it("never overwrites one a human edited, and reports it Frozen", async () => {
+      const repo = createFixtureRepo({ ...LAYERED, "docs/guide/overview.md": "# Overview\n\nMine.\n" });
+
+      const result = await generate(repo.dir, {}, { llm: scriptedLlm(MODULES, {}, TOP_LEVEL) });
+
+      expect(read(repo.dir, "docs/guide/overview.md")).toBe("# Overview\n\nMine.\n");
+      expect(result.frozen).toEqual(["overview"]);
+    });
   });
 
   describe("verification", () => {

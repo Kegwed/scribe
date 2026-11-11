@@ -3,13 +3,27 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
 import { isFrozen } from "../manifest.ts";
-import { changedEvidence, isRemovedModuleSection, openTarget, PROPOSAL_SUFFIX, proposalPath, readSection, sectionPath } from "../target.ts";
+import {
+  allEvidence,
+  changedEvidence,
+  isRemovedModuleSection,
+  openTarget,
+  PROPOSAL_SUFFIX,
+  proposalPath,
+  readSection,
+  sectionIdOf,
+  sectionPath,
+  subjects,
+} from "../target.ts";
 
 export interface SectionStatus {
   section: string;
   /** Repo-relative path of the Section's file. */
   file: string;
-  /** The Section's Module was added since Scribe last wrote the Guide, and has no Section yet; `update` writes one. */
+  /**
+   * The Section has never been written: its Module was added since Scribe last
+   * wrote the Guide, or it is a top-level Section the Guide predates; `update` writes it.
+   */
   added: boolean;
   /** The Section's Module no longer exists; `update` drops its record and leaves its file for a human to delete. */
   removed: boolean;
@@ -19,7 +33,7 @@ export interface SectionStatus {
   frozen: boolean;
   /** Evidence the Section cites has changed since Scribe last wrote it. */
   stale: boolean;
-  /** Ids of the cited symbols whose text changed or which no longer exist. */
+  /** Ids of the cited Evidence that changed or no longer exists. */
   changedEvidence: string[];
 }
 
@@ -31,16 +45,17 @@ export interface StatusResult {
 
 /**
  * Reports each Section in the manifest as Stale, Frozen, missing or removed,
- * each Module without one as added, and each pending Proposal, by hashing the Target repo as it is
+ * each Section never written as added, and each pending Proposal, by hashing the Target repo as it is
  * now. Calls no LLM and no network service.
  */
 export async function status(repoDir: string): Promise<StatusResult> {
   const target = await openTarget(repoDir);
-  const { config, sectionIds, symbols, manifest } = target;
+  const { config, manifest } = target;
+  const evidence = allEvidence(target);
 
   const recorded = await Promise.all(Object.entries(manifest.sections).map(async ([section, record]) => {
     const content = await readSection(repoDir, record.file);
-    const changed = changedEvidence(record, symbols);
+    const changed = changedEvidence(record, evidence);
     return {
       section,
       file: record.file,
@@ -52,7 +67,8 @@ export async function status(repoDir: string): Promise<StatusResult> {
       changedEvidence: changed,
     };
   }));
-  const unrecorded = await Promise.all([...sectionIds.values()].filter((section) => !manifest.sections[section]).map(async (section) => {
+  const sections = subjects(target).map((subject) => sectionIdOf(target, subject));
+  const unrecorded = await Promise.all(sections.filter((section) => !manifest.sections[section]).map(async (section) => {
     const file = sectionPath(config, section);
     const frozen = isFrozen(await readSection(repoDir, file), undefined);
     return { section, file, added: !frozen, removed: false, missing: false, frozen, stale: false, changedEvidence: [] };
