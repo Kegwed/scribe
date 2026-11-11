@@ -1,9 +1,20 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeLlm, type Llm, type LlmRequest, PROMPT_LIMIT, requestKey } from "../llm.ts";
 
-const CASSETTES = join(dirname(fileURLToPath(import.meta.url)), "cassettes");
+export const CASSETTES = join(dirname(fileURLToPath(import.meta.url)), "cassettes");
+
+/**
+ * One recorded response: Claude's text and the id the API gave its message,
+ * which shows it came from Claude. A bare string is a response recorded before
+ * ids were kept; `legacy-recordings.json` lists the keys allowed one.
+ */
+export type Recording = { response: string; id: string } | string;
+
+export function readCassette(file: string): Record<string, Recording> {
+  return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+}
 
 export interface RecordedLlm extends Llm {
   /** Requests that reached this adapter, which a cache hit never does. */
@@ -13,12 +24,14 @@ export interface RecordedLlm extends Llm {
 /**
  * Replays responses recorded in `cassettes/<name>.json`, keyed by request
  * content. With SCRIBE_RECORD=1 it calls Claude for requests it has no
- * recording of, and records them.
+ * recording of, and records them. With SCRIBE_USED_KEYS set to a directory, it
+ * notes there every key it was asked for, so `npm run check` can find unused ones.
  */
 export function recordedLlm(name: string, { promptLimit = PROMPT_LIMIT }: { promptLimit?: number } = {}): RecordedLlm {
   const file = join(CASSETTES, `${name}.json`);
-  const cassette: Record<string, string> = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  const cassette = readCassette(file);
   const calls: LlmRequest[] = [];
+  const usedKeys = process.env.SCRIBE_USED_KEYS;
 
   return {
     calls,
@@ -26,16 +39,17 @@ export function recordedLlm(name: string, { promptLimit = PROMPT_LIMIT }: { prom
     async complete(request) {
       calls.push(request);
       const key = requestKey(request);
+      if (usedKeys) appendFileSync(join(usedKeys, `${name}.${process.pid}.keys`), `${key}\n`);
       const recorded = cassette[key];
-      if (recorded !== undefined) return recorded;
+      if (recorded !== undefined) return typeof recorded === "string" ? recorded : recorded.response;
       if (!process.env.SCRIBE_RECORD) {
-        throw new Error(`no recording of ${key} in ${file}; re-record with SCRIBE_RECORD=1\n${request.prompt}`);
+        throw new Error(`no recording of ${key} in ${file}; re-record with npm run record -- ${name}\n${request.prompt}`);
       }
-      const response = await claudeLlm().complete(request);
-      cassette[key] = response;
+      const { text, id } = await claudeLlm().answer(request);
+      cassette[key] = { response: text, id };
       mkdirSync(CASSETTES, { recursive: true });
       writeFileSync(file, JSON.stringify(cassette, null, 2) + "\n");
-      return response;
+      return text;
     },
   };
 }

@@ -78,28 +78,39 @@ export interface Llm {
  */
 export const PROMPT_LIMIT = 400_000;
 
-export function claudeLlm(): Llm {
+/** Claude's response text, with the id the API gave its message. */
+export interface ClaudeAnswer {
+  text: string;
+  id: string;
+}
+
+export function claudeLlm(): Llm & { answer(request: LlmRequest): Promise<ClaudeAnswer> } {
   const client = new Anthropic();
+  const answer = async ({ model, system, prompt, schema }: LlmRequest): Promise<ClaudeAnswer> => {
+    const message = await client.beta.messages
+      .stream({
+        model,
+        max_tokens: 64000,
+        // Refusals on Sonnet re-run server-side; Haiku has no server-side fallback.
+        ...(model === MODELS.write
+          ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
+          : {}),
+        system,
+        messages: [{ role: "user", content: prompt }],
+        output_config: { format: { type: "json_schema", schema } },
+      })
+      .finalMessage();
+    if (message.stop_reason !== "end_turn") {
+      throw new Error(`${model} stopped early: ${message.stop_reason}`);
+    }
+    const text = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+    return { text, id: message.id };
+  };
   return {
     promptLimit: PROMPT_LIMIT,
-    async complete({ model, system, prompt, schema }) {
-      const message = await client.beta.messages
-        .stream({
-          model,
-          max_tokens: 64000,
-          // Refusals on Sonnet re-run server-side; Haiku has no server-side fallback.
-          ...(model === MODELS.write
-            ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
-            : {}),
-          system,
-          messages: [{ role: "user", content: prompt }],
-          output_config: { format: { type: "json_schema", schema } },
-        })
-        .finalMessage();
-      if (message.stop_reason !== "end_turn") {
-        throw new Error(`${model} stopped early: ${message.stop_reason}`);
-      }
-      return message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+    answer,
+    async complete(request) {
+      return (await answer(request)).text;
     },
   };
 }

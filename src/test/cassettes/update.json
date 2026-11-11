@@ -1,23 +1,130 @@
 {
-  "_handwritten": "These responses were written by hand, not recorded from Claude. Replace them with npm run record.",
-  "bf3369f77388620d8467f99a17d2eee1fd5ca9a2a6a03d3d64eea9909992d79b": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Pricing Module exports roundPrice, which rounds a price to whole cents.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]},{\"text\":\"It also exports the CURRENCY constant, set to \\\"EUR\\\".\",\"evidence\":[\"src/pricing/price.ts#CURRENCY\"]}]}]}",
-  "68201116c7041f2aa404db7bbdfc22c4a8abb6378d112474a8cdaf475f9d6aca": "{\"confirmed\":true,\"reason\":\"The cited symbol shows everything the Claim states.\"}",
-  "07585d35f011ce6572aaf2941e56b0cbb273d3ef092f81763d36d0230acc88d3": "{\"confirmed\":true,\"reason\":\"The cited symbol shows everything the Claim states.\"}",
-  "a978b2ca6f8d248525b7fa257e07df1e0378f8eaefa3699f52b1db74a5758f4c": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Greeting Module exports greet, which returns a greeting that includes the given name.\",\"evidence\":[\"src/greeting/greet.ts#greet\"]}]}]}",
-  "61af2a145cdc1f7c5f3262da9e0c3acbe8253eecac61bc7069d6435276c17e74": "{\"confirmed\":true,\"reason\":\"The cited symbol shows everything the Claim states.\"}",
-  "8397893974de089196e107a9692b39df41c3dce79befb4a08eb7d569de9a7366": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Pricing Module exports roundPrice, which rounds a price down to whole cents.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]},{\"text\":\"It also exports the CURRENCY constant, set to \\\"EUR\\\".\",\"evidence\":[\"src/pricing/price.ts#CURRENCY\"]}]}]}",
-  "fd5b56a109f490aa30217a5e036a9115818fae2c721a5e06e083594d67ae96bb": "{\"confirmed\":true,\"reason\":\"The cited symbol shows everything the Claim states.\"}",
-  "c2982d943edca22b4858b17576dfc7fb203eb11f44a0cf2ca5cf18bac5a64210": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The repository is organized into two Modules: Pricing, located at src/pricing, and Greeting, located at src/greeting.\",\"evidence\":[\"graph:modules\"]}]}]}",
-  "a00f9914e217a8f732def9ca9570a07597608f2f89a03441dc9147c89c559d63": "{\"confirmed\": true, \"reason\": \"The Evidence lists exactly two modules, Pricing at src/pricing and Greeting at src/greeting, which matches the Claim's names and paths. The Evidence does not state that these are the only modules, but the Claim's statement that the repository is organized into two Modules is consistent with the listed modules and does not contradict the Evidence.\"}",
-  "467eda4a7e3682ad29ab9177de9b77b099ef6eed957b849d9f369687b61036d7": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The repository consists of two Modules: Pricing (in src/pricing) and Greeting (in src/greeting).\",\"evidence\":[\"graph:modules\"]},{\"text\":\"Neither Module imports the other, and no Module imports any other Module, so there are no dependencies between them.\",\"evidence\":[\"graph:imports\"]}]},{\"claims\":[{\"text\":\"Because there are no imports between Modules, the repository has no layers or cross-Module flow; Pricing and Greeting are independent of each other and can be understood separately.\",\"evidence\":[\"graph:modules\",\"graph:imports\"]}]}]}",
-  "d5fffad17f41b3edc8d54775e6ef8f31e5de11faad4833bf3eaa4355816c4507": "{\"confirmed\": false, \"reason\": \"The Evidence lists the two Modules Pricing (src/pricing) and Greeting (src/greeting), which matches those parts of the Claim. However, the Claim asserts that the repository 'consists of' only these two Modules, and the Evidence does not establish that these are the only Modules; it gives no complete inventory showing nothing else exists, so the 'consists of two' part goes beyond what the Evidence shows.\"}",
-  "28e0b2b7c82f41cdfc11e817e618ceb946cb359d89f77906d68282777f4d5982": "{\"confirmed\": false, \"reason\": \"The evidence shows only that Pricing and Greeting exist and that no Module imports another. It does not establish that the repository has no layers, since layering is not addressed, and it does not rule out cross-Module flow such as runtime calls or shared data that the import graph would not capture. The claim's conclusions that there are no layers or cross-Module flow, and that the Modules can be understood separately, go beyond what the evidence shows.\"}",
-  "16abcd3352ad8f4775e5c51b6e6217f8f24ca184cacf0f7dc3e6f8655a926025": "{\"confirmed\": false, \"reason\": \"The evidence only shows that no Module imports another. The claim's conclusion that there are therefore 'no dependencies between them' goes beyond that: dependencies can exist without imports, such as through shared configuration, runtime calls, or other coupling, and the evidence does not rule these out.\"}",
-  "c59ce8460f619fa0693d821d2179d23bf566cfd730a721102cf81477672b87ef": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Modules listed for the repository are Pricing (in src/pricing) and Greeting (in src/greeting).\",\"evidence\":[\"graph:modules\"]},{\"text\":\"The import graph records that no Module imports another Module, so neither Pricing nor Greeting imports the other.\",\"evidence\":[\"graph:imports\"]}]},{\"claims\":[{\"text\":\"Since the import graph records no imports between the listed Modules Pricing and Greeting, it shows no import-based dependency order between them, and so no import-based layers or import-based flow from one to the other.\",\"evidence\":[\"graph:modules\",\"graph:imports\"]}]}]}",
-  "933ea5ad7ba9feda695ce65897648b016831b40ea86dde5acfd434ce62191ee9": "{\"confirmed\": true, \"reason\": \"The evidence states that no Module imports another, which directly supports the claim that the import graph records no inter-Module imports. The claim's extra inference that neither Pricing nor Greeting imports the other follows directly from that statement, since both are Modules. The evidence does not name Pricing or Greeting, but they are covered by the general statement about all Modules, so nothing in the claim goes beyond it.\"}",
-  "a37824c3962a520c4cb68553155dd780e1e56f28493229adf7b928c2b1f45a3a": "{\"confirmed\": true, \"reason\": \"The Evidence lists exactly two modules: Pricing at src/pricing and Greeting at src/greeting. The Claim states the same two modules with the same paths, and nothing beyond them.\"}",
-  "67a06dab31b7e7a7764b8b517293e0370448d2224dbd287049458ddb02dc23b2": "{\"confirmed\": true, \"reason\": \"The import graph states that no Module imports another, which covers the claimed absence of imports between Pricing and Greeting. The claim's conclusions about no import-based dependency order, layers, or flow follow directly from having no import edges, and the evidence does not contradict them.\"}",
-  "e890381ff0ab238f80aab5d58fb5534440b991e8fd9b495d3eab2d42189e4c14": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Modules listed for the repository are Pricing (in src/pricing) and Greeting (in src/greeting).\",\"evidence\":[\"graph:modules\"]},{\"text\":\"According to the import graph, no Module imports another Module, so neither Pricing nor Greeting imports the other.\",\"evidence\":[\"graph:imports\"]}]},{\"claims\":[{\"text\":\"Because the import graph shows no imports between Modules, it shows no import-based layering or import-based flow from one Module to another between Pricing and Greeting.\",\"evidence\":[\"graph:modules\",\"graph:imports\"]}]}]}",
-  "73d770d5a6a4189c1f98f9e7b2cfa47282b376e682af5368e8696f8ecc428a62": "{\"confirmed\": true, \"reason\": \"The evidence states that no Module imports another, which directly supports the claim's statement that no Module imports another. The claim's extra remark that neither Pricing nor Greeting imports the other is a direct instance of that general statement, so it is also shown by the evidence.\"}",
-  "c4f13eac4183a1e1eee9e5bec9354777fd86d7bc0a8ada8cdd96228df28f473f": "{\"confirmed\": true, \"reason\": \"The import graph states that no Module imports another, which covers Pricing and Greeting in both directions. With no import edges, there can be no import-based layering or import-based flow between them, so the claim follows from the evidence.\"}"
+  "bf3369f77388620d8467f99a17d2eee1fd5ca9a2a6a03d3d64eea9909992d79b": {
+    "response": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Pricing module lives in src/pricing and, from the symbols supplied, contains small price-related helpers in price.ts.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\",\"src/pricing/price.ts#CURRENCY\"]}]},{\"claims\":[{\"text\":\"The module's public surface consists of two exports: the function roundPrice and the constant CURRENCY.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\",\"src/pricing/price.ts#CURRENCY\"]},{\"text\":\"roundPrice takes a numeric price and rounds it to whole cents.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]},{\"text\":\"CURRENCY is a constant whose value is the string \\\"EUR\\\".\",\"evidence\":[\"src/pricing/price.ts#CURRENCY\"]}]},{\"claims\":[{\"text\":\"Internally, roundPrice multiplies the price by 100, applies Math.round, and divides the result by 100.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]}]}]}",
+    "id": "msg_011Cgwv1tvsYwhDq44YUXNhw"
+  },
+  "c980a1e9bf225e15faf735a9df5a9ebe8fd36932162ea81695db5bec4454df5b": {
+    "response": "{\"confirmed\": true, \"reason\": \"The function signature takes a numeric price parameter, and its body computes Math.round(price * 100) / 100, which rounds to two decimal places (whole cents), matching the doc comment 'Rounds a price to whole cents.'\"}",
+    "id": "msg_011Cgwv29soTYmW29zVN4K9J"
+  },
+  "de4870eb28194bbe71df0bc7918f6a0834952d29025ca780d09ac97d13f5caf8": {
+    "response": "{\"confirmed\": true, \"reason\": \"The symbol body is `Math.round(price * 100) / 100`, which multiplies the price by 100, applies Math.round, and divides the result by 100, exactly as the claim states.\"}",
+    "id": "msg_011Cgwv29oKs2wgcPqBAtN87"
+  },
+  "a59563e0945792086944a4dc4671f76433341d8fb45ae769985924cc5c7abaca": {
+    "response": "{\"confirmed\": true, \"reason\": \"The supplied symbols show two exported symbols from src/pricing/price.ts: the function roundPrice (marked exported=\\\"true\\\") and the constant CURRENCY (marked exported=\\\"true\\\"). Nothing else in the supplied evidence is exported, so the claim that the public surface consists of exactly these two exports is supported. The claim does not go beyond the evidence, though it cannot rule out exports absent from the supplied symbols; within the given evidence it holds.\"}",
+    "id": "msg_011Cgwv29oagVx97PhooFQzN"
+  },
+  "ac8b2b9aae74755babedbd2459868c3c3077dca9c516f282f83ec7be8686ef34": {
+    "response": "{\"confirmed\": true, \"reason\": \"The symbol declares `export const CURRENCY = \\\"EUR\\\"`, so CURRENCY is a constant whose value is the string \\\"EUR\\\", exactly as the claim states.\"}",
+    "id": "msg_011Cgwv29qZDG9qnDS85fPJj"
+  },
+  "2d4c92444a343a70879f4810bb003aa8c37daaca5eb838595c274cde649a9a62": {
+    "response": "{\"confirmed\": false, \"reason\": \"The symbols do show src/pricing/price.ts with roundPrice (a rounding helper) and CURRENCY, so the path and the price-related content are supported. However, CURRENCY is a constant, not a helper, so describing price.ts as containing only helpers goes beyond the symbols. The claim that the whole 'Pricing module' lives in src/pricing also goes beyond them, since the symbols show only one file and do not establish that the module is confined to that directory.\"}",
+    "id": "msg_011Cgwv29mr1nQPCqfj8yKnn"
+  },
+  "52e7df29f086c1e32f2bc0bd3a1384d6e4ed00bbcbc7cd73a3900c3eaac3b30f": {
+    "response": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Pricing module is located at src/pricing, and the supplied symbols show a file, price.ts, that holds a price-rounding function named roundPrice and a currency constant named CURRENCY.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\",\"src/pricing/price.ts#CURRENCY\"]}]},{\"claims\":[{\"text\":\"The module's public surface consists of two exports: the function roundPrice and the constant CURRENCY.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\",\"src/pricing/price.ts#CURRENCY\"]},{\"text\":\"roundPrice takes a numeric price and rounds it to whole cents.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]},{\"text\":\"CURRENCY is a constant whose value is the string \\\"EUR\\\".\",\"evidence\":[\"src/pricing/price.ts#CURRENCY\"]}]},{\"claims\":[{\"text\":\"Internally, roundPrice multiplies the price by 100, applies Math.round, and divides the result by 100.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]}]}]}",
+    "id": "msg_011Cgwv2TwFAqTyTE3qzihXX"
+  },
+  "46d899f70a52159829acf88fb8fa847ce1437ffeff62a9d29853e305fc9e7578": {
+    "response": "{\"confirmed\": true, \"reason\": \"Both symbols are in src/pricing/price.ts, which supports the location claim. roundPrice is a function that rounds a price to two decimals, matching the 'price-rounding' description, and CURRENCY is an exported constant set to \\\"EUR\\\". Calling src/pricing the 'Pricing module' is a naming inference, but the file path directly supports it.\"}",
+    "id": "msg_011Cgwv2g7j7ogbXDeFTSjb4"
+  },
+  "a978b2ca6f8d248525b7fa257e07df1e0378f8eaefa3699f52b1db74a5758f4c": {
+    "response": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Greeting module is a small module that builds a greeting message for a given name.\",\"evidence\":[\"src/greeting/greet.ts#greet\"]}]},{\"claims\":[{\"text\":\"Its public surface is a single exported function, greet, which takes a name as a string.\",\"evidence\":[\"src/greeting/greet.ts#greet\"]},{\"text\":\"greet returns a string of the form \\\"Hello, \\\" followed by the supplied name.\",\"evidence\":[\"src/greeting/greet.ts#greet\"]}]},{\"claims\":[{\"text\":\"The internals are minimal: greet builds its result with a template literal and does no validation, formatting or other processing of the name.\",\"evidence\":[\"src/greeting/greet.ts#greet\"]}]}]}",
+    "id": "msg_011Cgwv2vXeaGqw16ukc2ZE2"
+  },
+  "5bec4b5d2034c96d5eb16b6470d5a697a0a0d4021a5b0413e319584f9ae72259": {
+    "response": "{\"confirmed\": true, \"reason\": \"The symbol greet(name: string) returns the template literal `Hello, ${name}`, which is a string consisting of \\\"Hello, \\\" followed by the supplied name, exactly as the claim states.\"}",
+    "id": "msg_011Cgwv37sXgDPgdakn8vXY1"
+  },
+  "c09810066a99158c7250ae79bfaea5fd62a20d89e53eba29f28481a2df7bbdfd": {
+    "response": "{\"confirmed\": false, \"reason\": \"The symbol shows only a single exported function greet(name) that returns a greeting string. The claim that the Greeting module is 'small' and 'builds a greeting message for a given name' is partly supported, but the evidence does not show the module's full contents (other files, size, or whether greet is the module's only function), so 'small module' cannot be verified from the supplied symbols alone.\"}",
+    "id": "msg_011Cgwv37mZnYefePSGmo5Du"
+  },
+  "3b36cfaf43d09fe1b90dbc03ffc1f08ecadca94e5fb9c843ccd78036be359a51": {
+    "response": "{\"confirmed\": true, \"reason\": \"The symbol shows the full body of greet: it returns a template literal `Hello, ${name}` with no validation, no formatting, and no other processing of name. The claim's description of the internals matches the code exactly.\"}",
+    "id": "msg_011Cgwv37q3nEqFgen8Uopm5"
+  },
+  "57cb538f66c431e1749ff8ce6d3e41a15e3f80c52167185c4d603869b8c3b49e": {
+    "response": "{\"confirmed\": false, \"reason\": \"The evidence confirms that greet is exported and takes name: string, but the claim's word 'single' asserts that greet is the only export of the public surface. The supplied symbols show just this one symbol, so they cannot establish that no other exports exist.\"}",
+    "id": "msg_011Cgwv37o4npdAeiknL45TE"
+  },
+  "dbbfcb14c2a56a40ddf0959d15f1ddfd287f31fbf534bf83e6073afc96727b1e": {
+    "response": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Greeting module includes a function, greet, that builds a greeting message for a given name.\",\"evidence\":[\"src/greeting/greet.ts#greet\"]}]},{\"claims\":[{\"text\":\"Its public surface includes an exported function, greet, which takes a name as a string.\",\"evidence\":[\"src/greeting/greet.ts#greet\"]},{\"text\":\"greet returns a string of the form \\\"Hello, \\\" followed by the supplied name.\",\"evidence\":[\"src/greeting/greet.ts#greet\"]}]},{\"claims\":[{\"text\":\"The internals are minimal: greet builds its result with a template literal and does no validation, formatting or other processing of the name.\",\"evidence\":[\"src/greeting/greet.ts#greet\"]}]}]}",
+    "id": "msg_011Cgwv3MbGhq1ZDATMjLQGP"
+  },
+  "8dfde4f8ad0b706c2bc17850a508fab7086460f9ac3f636fadb915b1f01488ad": {
+    "response": "{\"confirmed\": true, \"reason\": \"The symbol src/greeting/greet.ts#greet is an exported function named greet that takes a name parameter and returns the message `Hello, ${name}`, which is a greeting message built for a given name. The file path places it in the greeting module, so the claim is fully supported by the evidence.\"}",
+    "id": "msg_011Cgwv3eZyppLiYwQtxcYY4"
+  },
+  "412b7b823c4e0415c89f88f5a0605ba8b511091be3f6a314041d9591e1ea2565": {
+    "response": "{\"confirmed\": true, \"reason\": \"The symbol src/greeting/greet.ts#greet is marked exported=true and is declared as export function greet(name: string), so it is an exported function that takes a name parameter typed as string. The claim's statement is fully supported by the supplied symbol.\"}",
+    "id": "msg_011Cgwv3f4W5FsgLqyodNZ1T"
+  },
+  "bf39704abe8b337d3de82477c5e6d894652afeef6861176a488bdcfc6fe2f554": {
+    "response": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The repository is organized into two Modules: Pricing, located at src/pricing, and Greeting, located at src/greeting.\",\"evidence\":[\"graph:modules\"]}]}]}",
+    "id": "msg_011Cgwv3jepoqnKaqLmcVKBY"
+  },
+  "a00f9914e217a8f732def9ca9570a07597608f2f89a03441dc9147c89c559d63": {
+    "response": "{\"confirmed\": true, \"reason\": \"The evidence lists exactly two modules, Pricing at src/pricing and Greeting at src/greeting, which matches the claim's names and paths and its statement that there are two modules.\"}",
+    "id": "msg_011Cgwv3stvPBJjc3Tw6FtGF"
+  },
+  "024ac434d4ee568d49c16e91d156ebdf30d1913a0e1cf07c6f0f7635ceffe9f9": {
+    "response": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The repository is made up of two Modules: Pricing, located at src/pricing, and Greeting, located at src/greeting.\",\"evidence\":[\"graph:modules\"]},{\"text\":\"Neither Module imports the other, and no Module imports any other Module, so there are no dependencies between Modules.\",\"evidence\":[\"graph:imports\"]},{\"text\":\"Because of this, the two Modules sit side by side as independent units rather than in layers, and there is no flow between them; a newcomer can read or change either one without needing to understand the other.\",\"evidence\":[\"graph:imports\",\"graph:modules\"]}]}]}",
+    "id": "msg_011Cgwv3xms2nqXFuD46qiTw"
+  },
+  "b37c160e5f6f99d6970a24e5038199ef39abba3539474b8923318f7e3220af5c": {
+    "response": "{\"confirmed\": true, \"reason\": \"The evidence lists exactly two modules: Pricing at src/pricing and Greeting at src/greeting, matching the claim's names and paths and the claim that the repository is made up of these two modules.\"}",
+    "id": "msg_011Cgwv4Az5abDqd52WBeYZd"
+  },
+  "dc1246028a541cd7882dc5267a397fcf55576e686735e866c02e5af63dbebde5": {
+    "response": "{\"confirmed\": false, \"reason\": \"The evidence only states that no Module imports another, which supports the import part of the claim. However, the claim concludes there are 'no dependencies between Modules', which goes beyond the evidence: dependencies can exist without direct imports (e.g., shared packages, runtime calls, data or build-level dependencies), and the evidence says nothing about those.\"}",
+    "id": "msg_011Cgwv4B3YWmUuzuYQkKG2S"
+  },
+  "9725dc3dc3160598b49da3f7aa16c4220321da878ee33a3d9c671cdb38b9d124": {
+    "response": "{\"confirmed\": false, \"reason\": \"The evidence shows only that neither Module imports the other. It does not show the claim's wider points: that there is no flow of any kind (such as runtime calls or shared data), that the Modules are arranged side by side rather than in layers, or that a newcomer can read or change either one without understanding the other. The causal 'Because of this' link is also not supported by the evidence.\"}",
+    "id": "msg_011Cgwv4B14mAi4SGSFKPrg8"
+  },
+  "3043ec2792787053c50ba1e7b1f9cf4ac94dc8271bbb885c0777bf88b1a5fa32": {
+    "response": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The repository is made up of two Modules: Pricing, located at src/pricing, and Greeting, located at src/greeting.\",\"evidence\":[\"graph:modules\"]},{\"text\":\"Neither Module imports the other, and no Module imports any other Module.\",\"evidence\":[\"graph:imports\"]},{\"text\":\"The import graph therefore shows no import-based layering between Pricing and Greeting: neither sits above the other in an import chain.\",\"evidence\":[\"graph:imports\",\"graph:modules\"]}]}]}",
+    "id": "msg_011Cgwv4Mc3ifzVk6dgTXw3e"
+  },
+  "fd452a713da8538c53324b9af104e949a9e57426acd0616e03a601b78729d192": {
+    "response": "{\"confirmed\": true, \"reason\": \"The evidence states that no Module imports another, and lists Pricing and Greeting as the modules. From that, neither module can sit above the other in an import chain, so the claim that there is no import-based layering between them follows directly.\"}",
+    "id": "msg_011Cgwv4Wa4DoXRFmpvZhExF"
+  },
+  "fd3c491f4dae7511bc268eeeb6bbe0c2997d276d690dd10a6c4152fbc26ae39e": {
+    "response": "{\"confirmed\": true, \"reason\": \"The Claim says neither Module imports the other and no Module imports any other Module. The Evidence states 'No Module imports another.' This covers both directions and all pairs, so the Claim is fully supported.\"}",
+    "id": "msg_011Cgwv4WbHrdJbn4vLxfmSQ"
+  },
+  "23e356bc51ce7407d179c7af565b535e657fbd898d7271625899817c5a44bbdb": {
+    "response": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Pricing module is located at src/pricing, and the supplied symbols show a file, price.ts, that holds a price-rounding function named roundPrice and a currency constant named CURRENCY.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\",\"src/pricing/price.ts#CURRENCY\"]}]},{\"claims\":[{\"text\":\"The module's public surface consists of two exports: the function roundPrice and the constant CURRENCY.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\",\"src/pricing/price.ts#CURRENCY\"]},{\"text\":\"roundPrice takes a numeric price and rounds it down to whole cents.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]},{\"text\":\"CURRENCY is a constant whose value is the string \\\"EUR\\\".\",\"evidence\":[\"src/pricing/price.ts#CURRENCY\"]}]},{\"claims\":[{\"text\":\"Internally, roundPrice multiplies the price by 100, applies Math.floor, and divides the result by 100.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]}]}]}",
+    "id": "msg_011Cgwv4g3pKhknUgZ3gE181"
+  },
+  "6477546ed12beee3fafddcb38a4b691b125978f4a8297924850ca33aa2e2f2bc": {
+    "response": "{\"confirmed\": true, \"reason\": \"The symbol roundPrice takes a numeric parameter price and returns Math.floor(price * 100) / 100, which rounds down to two decimal places, i.e. whole cents. The docstring also states it rounds down to whole cents, matching the Claim.\"}",
+    "id": "msg_011Cgwv59iCpGnZgRH1KrTgw"
+  },
+  "e9464f131c61708d7310a88403c4fb8c2cfb5d22e8ad53839a5d3e6702a191a9": {
+    "response": "{\"confirmed\": false, \"reason\": \"The symbols show roundPrice and CURRENCY are exported, but they do not establish that these are the module's only public exports; the evidence is limited to two symbols and cannot rule out other exports from src/pricing/price.ts or the module's index. The claim's 'consists of' (exhaustive) assertion goes beyond what the supplied symbols show.\"}",
+    "id": "msg_011Cgwv59dFRCGMab858gQkc"
+  },
+  "4e7b19aaf5ffe500af2056f1706ee2cf72b104bf9c6ac32f74244d240f09ab15": {
+    "response": "{\"confirmed\": true, \"reason\": \"The symbol's body is `Math.floor(price * 100) / 100`, which multiplies the price by 100, applies Math.floor, and divides the result by 100, exactly as the claim states.\"}",
+    "id": "msg_011Cgwv59WZNdHCqWXvn1cyj"
+  },
+  "2fbc373e01942ae4ed12f8768cda24cd4d1242e0e05904769a2d816499b651fb": {
+    "response": "{\"confirmed\": true, \"reason\": \"Both symbols have IDs under src/pricing/price.ts, so the file and its directory are shown. roundPrice is an exported function that rounds a price to whole cents, and CURRENCY is an exported constant set to \\\"EUR\\\". The claim's description of both matches the code.\"}",
+    "id": "msg_011Cgwv59W45uYnwonGbLCzA"
+  },
+  "48af9b90bdde83f8e35b4aeb2f7025c7d01a8ed0c17cce6a1b9067f2477ea857": {
+    "response": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Pricing module is located at src/pricing, and the supplied symbols show a file, price.ts, that holds a price-rounding function named roundPrice and a currency constant named CURRENCY.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\",\"src/pricing/price.ts#CURRENCY\"]}]},{\"claims\":[{\"text\":\"Among the module's public exports, the supplied symbols show the function roundPrice and the constant CURRENCY.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\",\"src/pricing/price.ts#CURRENCY\"]},{\"text\":\"roundPrice takes a numeric price and rounds it down to whole cents.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]},{\"text\":\"CURRENCY is a constant whose value is the string \\\"EUR\\\".\",\"evidence\":[\"src/pricing/price.ts#CURRENCY\"]}]},{\"claims\":[{\"text\":\"Internally, roundPrice multiplies the price by 100, applies Math.floor, and divides the result by 100.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]}]}]}",
+    "id": "msg_011Cgwv5JgCjyd8tNBFmT1MW"
+  },
+  "dcea8676017ac3c17aa0a838a70f7a4b03c9e51dd1522ab6ff8921b292c0ad9e": {
+    "response": "{\"confirmed\": true, \"reason\": \"Both supplied symbols come from src/pricing/price.ts and are marked exported=\\\"true\\\": roundPrice is a function and CURRENCY is a constant. The claim only says these two are shown among the module's exports, which the symbols support.\"}",
+    "id": "msg_011Cgwv5YgKv9ar9GSWpAaSD"
+  }
 }
