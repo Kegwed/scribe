@@ -164,7 +164,7 @@ interface Subject {
   /** Why a Claim fails before any model sees it, or undefined; deterministic. */
   check?(claim: Claim): string | undefined;
   /** Whether `sent` is enough to ask for the Section; otherwise it is written bare, without the LLM. */
-  writes(sent: Evidence[]): boolean;
+  worthAsking(sent: Evidence[]): boolean;
   /** A Module's churn Evidence, from which Scribe writes the Section's last Claim itself. */
   churn?: ChurnEvidence;
 }
@@ -214,7 +214,7 @@ export function sectionWriter(
       render: renderRepo,
       item: "Evidence item",
       uncited: `cites no Evidence ${title} draws on directly`,
-      writes: notDocsAlone,
+      worthAsking: notDocsAlone,
     };
   }
 
@@ -229,7 +229,7 @@ export function sectionWriter(
       render: renderSetup,
       item: "piece of Evidence",
       uncited: "cites no script, CI step or doc",
-      writes: notDocsAlone,
+      worthAsking: notDocsAlone,
       check({ text }) {
         const unmatched = unmatchedCommands(text, setup);
         if (unmatched.length === 0) return undefined;
@@ -239,7 +239,7 @@ export function sectionWriter(
     [CONVENTIONS]: () => ({
       title: "Conventions",
       items: conventionsEvidence(target),
-      writes: hasConventions,
+      worthAsking: hasConventions,
       system: (_, summarised) => (summarised ? `${CONVENTIONS_SYSTEM}\n\n${SUMMARISED_NOTE}` : CONVENTIONS_SYSTEM),
       verifySystem: () => VERIFY_CONVENTIONS_SYSTEM,
       render: renderModuleEvidence,
@@ -251,7 +251,7 @@ export function sectionWriter(
       // The ADRs, then the discussion on the repo's highest-ranked pull requests, as spec #1's Generation order decides.
       items: [...decisionRecords(docs), ...discussions.decisions],
       // Written from the ADRs and pull request threads alone: docs are this Section's own Evidence.
-      writes: (sent) => sent.length > 0,
+      worthAsking: (sent) => sent.length > 0,
       system: () => KEY_DECISIONS_SYSTEM,
       verifySystem: () => VERIFY_DECISIONS_SYSTEM,
       render: renderModuleEvidence,
@@ -290,7 +290,7 @@ export function sectionWriter(
       render: renderModuleEvidence,
       item: "symbol",
       uncited: "cites no Evidence from this Module",
-      writes: notDocsAlone,
+      worthAsking: notDocsAlone,
       churn: churn.get(module.path),
     };
   }
@@ -340,9 +340,9 @@ export function sectionWriter(
 
     const about = subject(section);
     const { evidence } = about;
-    const is = (id: string, kind: (e: Evidence) => boolean) => { const e = evidence.get(id); return e !== undefined && kind(e); };
+    const evidenceIs = (id: string, kind: (e: Evidence) => boolean) => { const e = evidence.get(id); return e !== undefined && kind(e); };
     const sided = found.filter(({ docs, code }) =>
-      docs.length > 0 && code.length > 0 && docs.every((id) => is(id, isDoc)) && code.every((id) => is(id, isCode)));
+      docs.length > 0 && code.length > 0 && docs.every((id) => evidenceIs(id, isDoc)) && code.every((id) => evidenceIs(id, isCode)));
     const claims = sided.map(({ description, docs, code }) => ({ text: description, evidence: [...docs, ...code] }));
     const failures = await verifySection(llm, models.verify, repoDir, { paragraphs: [{ claims }] }, { ...about, verifySystem: () => VERIFY_DRIFT_SYSTEM });
 
@@ -407,7 +407,7 @@ export function sectionWriter(
       ({ paragraphs: paragraphs.map(({ claims }) => ({ claims: claims.filter(({ text }) => !unsupported.has(text)) })) });
     const writeSection = (prompt: string) => completeCached(llm, repoDir, writeRequestFor(about, fitted, prompt), parseSection);
     const firstPrompt = fitted.prompt;
-    let written: SectionResponse = about.writes(fitted.sent) ? await writeSection(firstPrompt) : { paragraphs: [] };
+    let written: SectionResponse = about.worthAsking(fitted.sent) ? await writeSection(firstPrompt) : { paragraphs: [] };
     let failures = await verifySection(llm, models.verify, repoDir, scribes(written), about);
     const firstWritten = scribes(written).paragraphs.reduce((sum, p) => sum + p.claims.length, 0);
     const counts = { ...of, written: firstWritten, confirmed: firstWritten - failures.size, kept: 0 };
@@ -482,7 +482,7 @@ export function sectionWriter(
     // Unchanged but for where its links pin: the old pins still point at this same text, so rewriting would only churn.
     if (previous !== undefined && withoutPins(previous) === withoutPins(content) && sameEvidence) return false;
     if (permalinks) {
-      const files = [...citedEvidence.filter(inFile), ...citedEvidence.filter(isRepoEvidence).flatMap((e) => e.source ?? [])];
+      const files = [...citedEvidence.filter(inFile), ...citedEvidence.filter(isRepoEvidence).flatMap((e) => e.lines ?? [])];
       report.warnings.push(...uncommittedWarnings(repoDir, section, files));
     }
     const file = join(repoDir, path);
@@ -503,7 +503,7 @@ export function sectionWriter(
         : summaryCalls.map((request) => parseSummary(readCached(repoDir, request)!)));
       const request = writeRequestFor(about, fitted, fitted.prompt);
       // A Section with no Evidence is written without the LLM; a cached first write means a re-run of work already paid for.
-      const written = about.writes(fitted.sent);
+      const written = about.worthAsking(fitted.sent);
       if (uncachedSummaries.length === 0 && (!written || (!moduleSectionsChange && isCached(repoDir, request)))) {
         return { section, tokens: 0, dollars: 0, unpriced: [] };
       }
@@ -673,8 +673,8 @@ function githubPermalinks(repoDir: string): Permalinks | undefined {
 
 function citation(evidence: Evidence, permalinks: Permalinks | undefined): string {
   if (isRepoEvidence(evidence)) {
-    const { label, source } = evidence;
-    return permalinks && source ? `[${label}](${permalinks.file(source)})` : label;
+    const { label, lines } = evidence;
+    return permalinks && lines ? `[${label}](${permalinks.file(lines)})` : label;
   }
   if (evidence.kind === "github") return `[${evidence.label}](${evidence.url})`;
   const label = `${evidence.file} (${evidence.name})`;

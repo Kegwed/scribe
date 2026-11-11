@@ -163,7 +163,7 @@ describe("reset", () => {
     const repo = await generated();
     repo.commit({ "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }) });
 
-    await expect(reset(repo.dir, "modules/src-b", { llm: scriptedLlm("unused") })).rejects.toThrow(/no Module has the Section modules\/src-b/);
+    await expect(reset(repo.dir, "modules/src-b", { llm: scriptedLlm("unused") })).rejects.toThrow(/the Guide has no Section modules\/src-b/);
     expect(manifest(repo.dir).sections["modules/src-b"]).toBeDefined();
   });
 });

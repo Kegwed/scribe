@@ -121,12 +121,12 @@ export async function readSection(repoDir: string, path: string): Promise<string
 }
 
 /**
- * Throws unless `section` is one of the Guide's Sections, such as one whose
- * Module was removed; returns the Module whose Section it is, if any.
+ * The Module whose Section `section` is, or undefined for a top-level Section;
+ * throws unless it is one of the Guide's Sections, as a removed Module's isn't.
  */
-export function guideSection(target: Target, section: string): Module | undefined {
+export function sectionModule(target: Target, section: string): Module | undefined {
   if (!guideSections(target).includes(section)) {
-    throw new Error(`no Module has the Section ${section}; the Sections are ${guideSections(target).join(", ")}`);
+    throw new Error(`the Guide has no Section ${section}, as a removed Module's isn't; its Sections are ${guideSections(target).join(", ")}`);
   }
   return [...target.sectionIds].find(([, id]) => id === section)?.[0];
 }
@@ -194,8 +194,8 @@ async function repoEvidenceOf(repoDir: string, modules: Module[], imports: Modul
   const packageJson = join(repoDir, "package.json");
   if (existsSync(packageJson)) {
     const text = (await readFile(packageJson, "utf8")).replace(/\r\n?/g, "\n");
-    const source = { file: "package.json", startLine: 1, endLine: text.trimEnd().split("\n").length };
-    items.push({ kind: "repo", id: "file:package.json", label: "package.json", text, source });
+    const lines = { file: "package.json", startLine: 1, endLine: text.trimEnd().split("\n").length };
+    items.push({ kind: "repo", id: "file:package.json", label: "package.json", text, lines });
   }
   return new Map(items.map((item) => [item.id, { ...item, hash: contentHash(item.text) }]));
 }

@@ -1,7 +1,7 @@
 import type { Adapters } from "../adapters.ts";
 import { CACHE_DIR } from "../manifest.ts";
 import { emptyReport, sectionWriter } from "../section-writer.ts";
-import { clearProposal, guideSection, openTarget, readSection, sectionDiscussions, sectionPath } from "../target.ts";
+import { clearProposal, sectionModule, openTarget, readSection, sectionDiscussions, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
 
 export interface AdoptResult {
@@ -24,7 +24,7 @@ export async function adopt(
   { llm, github }: Adapters,
 ): Promise<AdoptResult> {
   const target = await openTarget(repoDir);
-  const module = guideSection(target, section);
+  const module = sectionModule(target, section);
   const path = sectionPath(target.config, section);
   const content = await readSection(repoDir, path);
   if (content === undefined) throw new Error(`${path} doesn't exist, so there is nothing to adopt; scribe reset ${section} writes it`);

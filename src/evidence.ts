@@ -39,7 +39,7 @@ export interface RepoEvidence {
   /** Hash of `text`. */
   hash: string;
   /** The lines of a file it is, if it is a file's content, which its citation links to. */
-  source?: { file: string; startLine: number; endLine: number };
+  lines?: { file: string; startLine: number; endLine: number };
 }
 
 export function isRepoEvidence(item: Evidence): item is RepoEvidence {

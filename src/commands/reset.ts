@@ -1,7 +1,7 @@
 import type { Adapters } from "../adapters.ts";
 import { CACHE_DIR } from "../manifest.ts";
 import { emptyReport, sectionWriter, type WriteReport } from "../section-writer.ts";
-import { clearProposal, guideSection, openTarget, readSection, sectionDiscussions, sectionPath } from "../target.ts";
+import { clearProposal, sectionModule, openTarget, readSection, sectionDiscussions, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
 
 export interface ResetResult extends WriteReport {
@@ -19,7 +19,7 @@ export async function reset(
   { llm, github }: Adapters,
 ): Promise<ResetResult> {
   const target = await openTarget(repoDir);
-  const module = guideSection(target, section);
+  const module = sectionModule(target, section);
   const existing = await readSection(repoDir, sectionPath(target.config, section));
   await gitIgnore(repoDir, CACHE_DIR);
   const result: ResetResult = emptyReport();
