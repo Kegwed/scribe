@@ -5,6 +5,7 @@ import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { scriptedLlm } from "../test/recorded-llm.ts";
 import { generate } from "./generate.ts";
 import { status } from "./status.ts";
+import { update } from "./update.ts";
 
 const README = [
   "# App",
@@ -51,6 +52,47 @@ describe("existing docs as a Source", () => {
     expect(evidence.map((e: { id: string }) => e.id)).toEqual(["README.md#sessions", "src/auth/session.ts#createSession"]);
   });
 
+  describe("staleness", () => {
+    const CITING = {
+      paragraphs: [{ claims: [{ text: "Sessions start with createSession.", evidence: ["README.md#sessions"] }] }],
+    };
+
+    it("makes a Section citing a doc passage Stale when that passage changes, and update rewrites it", async () => {
+      const repo = createFixtureRepo(TARGET);
+      await generate(repo.dir, {}, { llm: scriptedLlm(CITING) });
+      repo.commit({ "README.md": README.replace("to start a session", "to begin a session") });
+
+      expect((await status(repo.dir)).sections).toEqual([
+        expect.objectContaining({ section: "modules/src-auth", stale: true, changedEvidence: ["README.md#sessions"] }),
+      ]);
+      const llm = scriptedLlm(CITING);
+      await update(repo.dir, {}, { llm });
+      expect(llm.calls.some((c) => c.prompt.includes("to begin a session"))).toBe(true);
+      expect((await status(repo.dir)).sections[0]).toMatchObject({ stale: false });
+    });
+
+    it("doesn't make a Section Stale for edits to doc passages it doesn't cite", async () => {
+      const repo = createFixtureRepo(TARGET);
+      await generate(repo.dir, {}, { llm: scriptedLlm(CITING) });
+      repo.commit({ "README.md": README.replace("An app.", "An app for sessions.") });
+
+      expect((await status(repo.dir)).sections[0]).toMatchObject({ stale: false });
+    });
+  });
+
+  it("leaves every existing doc byte for byte as it was", async () => {
+    const adr = "# Use sessions\r\n\r\n`createSession` starts them.\r\n";
+    const repo = createFixtureRepo({ ...TARGET, "docs/adr/0001-sessions.md": adr, "CONTRIBUTING.md": "createSession\n" });
+    const docs = ["README.md", "docs/adr/0001-sessions.md", "CONTRIBUTING.md"];
+    const before = docs.map((d) => readFileSync(join(repo.dir, d)));
+
+    await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [] }, {}, { drift: [] }) });
+    repo.commit({ "src/auth/session.ts": "export function createSession(user: string) {\n  return user + 1;\n}\n" });
+    await update(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [] }) });
+
+    expect(docs.map((d) => readFileSync(join(repo.dir, d)))).toEqual(before);
+  });
+
   describe("Drift", () => {
     const CONTRADICTING: Files = {
       ...TARGET,
@@ -71,6 +113,28 @@ describe("existing docs as a Source", () => {
       const result = await generate(repo.dir, {}, { llm: llm() });
 
       expect(result.drift).toEqual([{ section: "modules/src-auth", ...DRIFT }]);
+      expect((await status(repo.dir)).drift).toEqual([{ section: "modules/src-auth", ...DRIFT }]);
+    });
+
+    it("makes a Section Stale when a doc it found Drift in is fixed, and update clears the Drift", async () => {
+      const repo = createFixtureRepo(CONTRADICTING);
+      await generate(repo.dir, {}, { llm: llm() });
+      repo.commit({ "README.md": README });
+
+      expect((await status(repo.dir)).sections[0]).toMatchObject({ stale: true, changedEvidence: ["README.md#sessions"] });
+      const result = await update(repo.dir, {}, { llm: llm([]) });
+
+      expect(result.drift).toEqual([]);
+      expect(await status(repo.dir)).toMatchObject({ drift: [], sections: [expect.objectContaining({ stale: false })] });
+    });
+
+    it("keeps reporting the Drift of a Section that isn't rewritten", async () => {
+      const repo = createFixtureRepo(CONTRADICTING);
+      await generate(repo.dir, {}, { llm: llm() });
+
+      const result = await update(repo.dir, {}, { llm: llm([]) });
+
+      expect(result.drift).toEqual([]);
       expect((await status(repo.dir)).drift).toEqual([{ section: "modules/src-auth", ...DRIFT }]);
     });
 

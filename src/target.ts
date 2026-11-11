@@ -43,10 +43,15 @@ export function proposalPath(config: Config, section: string): string {
 
 export const PROPOSAL_SUFFIX = ".proposal.md";
 
-/** Ids of the Evidence a Section cites whose text has changed or which no longer exists; the Section is Stale if any. */
+/**
+ * Ids of the Evidence a Section or its Drift cites whose text has changed or
+ * which no longer exists; the Section is Stale if any, so that rewriting it
+ * checks its Drift again.
+ */
 export function changedEvidence(record: SectionRecord, { symbols, docs }: Pick<Target, "symbols" | "docs">): string[] {
   const hashes = new Map([...symbols, ...docs].map((e) => [e.id, e.hash]));
-  return record.evidence.filter(({ id, hash }) => hashes.get(id) !== hash).map(({ id }) => id);
+  const cited = [...record.evidence, ...(record.drift ?? []).flatMap((d) => [...d.docs, ...d.code])];
+  return [...new Set(cited.filter(({ id, hash }) => hashes.get(id) !== hash).map(({ id }) => id))];
 }
 
 /** A Section file's content, or undefined if it doesn't exist. */
