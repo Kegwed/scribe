@@ -112,7 +112,7 @@ describe("generate", () => {
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
 
     const { sections } = JSON.parse(read(repo.dir, ".scribe/manifest.json"));
-    expect(Object.keys(sections)).toEqual(["modules/src-auth", "modules/src-billing"]);
+    expect(Object.keys(sections)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started"]);
     expect(sections["modules/src-billing"]).toEqual({
       file: "docs/guide/modules/src-billing.md",
       evidence: [{

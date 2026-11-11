@@ -33,6 +33,7 @@ describe("status", () => {
     expect(sections).toEqual([
       { section: "modules/src-a", file: "docs/guide/modules/src-a.md", added: false, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
       { section: "modules/src-b", file: "docs/guide/modules/src-b.md", added: false, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
+      { section: "getting-started", file: "docs/guide/getting-started.md", added: false, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
     ]);
   });
 
@@ -45,6 +46,7 @@ describe("status", () => {
     expect(sections).toEqual([
       expect.objectContaining({ section: "modules/src-a", frozen: false, stale: true, changedEvidence: ["src/a/a.ts#a"] }),
       expect.objectContaining({ section: "modules/src-b", stale: false }),
+      expect.objectContaining({ section: "getting-started", stale: false }),
     ]);
   });
 
@@ -54,7 +56,7 @@ describe("status", () => {
 
     const { sections } = await status(repo.dir);
 
-    expect(sections.map((s) => s.stale)).toEqual([false, false]);
+    expect(sections.map((s) => s.stale)).toEqual([false, false, false]);
   });
 
   it("reports a Section Stale when a symbol it cites is gone", async () => {
@@ -75,6 +77,7 @@ describe("status", () => {
     expect(sections).toEqual([
       expect.objectContaining({ section: "modules/src-a", frozen: true, stale: false }),
       expect.objectContaining({ section: "modules/src-b", frozen: false }),
+      expect.objectContaining({ section: "getting-started", frozen: false }),
     ]);
   });
 
@@ -129,6 +132,7 @@ describe("status", () => {
     expect(sections).toEqual([
       expect.objectContaining({ section: "modules/src-a", added: false }),
       expect.objectContaining({ section: "modules/src-b", added: false }),
+      expect.objectContaining({ section: "getting-started", added: false }),
       { section: "modules/src-c", file: "docs/guide/modules/src-c.md", added: true, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
     ]);
   });
@@ -142,7 +146,7 @@ describe("status", () => {
 
     const { sections } = await status(repo.dir);
 
-    expect(sections[2]).toMatchObject({ section: "modules/src-c", added: false, frozen: true });
+    expect(sections.find((s) => s.section === "modules/src-c")).toMatchObject({ added: false, frozen: true });
   });
 
   it("reports the Section of a removed Module", async () => {
@@ -155,6 +159,7 @@ describe("status", () => {
     expect(sections).toEqual([
       expect.objectContaining({ section: "modules/src-a", removed: false }),
       expect.objectContaining({ section: "modules/src-b", removed: true }),
+      expect.objectContaining({ section: "getting-started", removed: false }),
     ]);
   });
 

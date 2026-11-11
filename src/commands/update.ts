@@ -1,7 +1,7 @@
 import type { Adapters } from "../adapters.ts";
 import { CACHE_DIR, isFrozen, saveManifest } from "../manifest.ts";
 import { emptyReport, sectionWriter, type WriteReport } from "../section-writer.ts";
-import { changedEvidence, isRemovedModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
+import { allEvidence, changedEvidence, guideSections, isRemovedModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
 
 export interface UpdateOptions {}
@@ -36,20 +36,20 @@ export async function update(
   }
   if (result.removed.length > 0) await saveManifest(repoDir, target.manifest);
 
-  for (const module of target.modules) {
-    const section = target.sectionIds.get(module)!;
+  const evidence = allEvidence(target);
+  for (const section of guideSections(target)) {
     const record = target.manifest.sections[section];
     const existing = await readSection(repoDir, sectionPath(target.config, section));
-    const changed = record ? changedEvidence(record, target.symbols) : [];
+    const changed = record ? changedEvidence(record, evidence) : [];
     const fromScratch = !record || existing === undefined;
     if (!fromScratch && changed.length === 0) continue;
     if (isFrozen(existing, record)) {
       // Only a recorded Section can be Stale: one Scribe never wrote cites no Evidence to have changed.
-      if (record && changed.length > 0) result.proposals.push({ section, file: await writer.propose(module) });
+      if (record && changed.length > 0) result.proposals.push({ section, file: await writer.propose(section) });
       else result.frozen.push(section);
       continue;
     }
-    await writer.write(module, existing, fromScratch ? undefined : changed);
+    await writer.write(section, existing, fromScratch ? undefined : changed);
   }
   return result;
 }

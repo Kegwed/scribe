@@ -40,7 +40,7 @@ describe("scribe status", () => {
 
     const { status, stdout } = scribe(repo.dir, "status");
 
-    expect(stdout).toBe("All 2 Sections current.\n");
+    expect(stdout).toBe("All 3 Sections current.\n");
     expect(status).toBe(0);
   });
 
@@ -145,7 +145,7 @@ describe("scribe update", () => {
       "",
     ].join("\n"));
     expect(update.status).toBe(0);
-    expect(scribe(repo.dir, "status").stdout).toBe("All 1 Section current.\n");
+    expect(scribe(repo.dir, "status").stdout).toBe("All 2 Sections current.\n");
   });
 });
 
