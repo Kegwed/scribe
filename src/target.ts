@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type CodeSymbol, typescriptAnalyser } from "./analyser.ts";
 import { CONFIG_FILE, type Config, loadConfig } from "./config.ts";
+import { GETTING_STARTED, type SetupEvidence, setupEvidence } from "./getting-started.ts";
 import { type ChurnEvidence, churnEvidence } from "./git-history.ts";
+import type { FileEvidence } from "./section-writer.ts";
 import { isGitHubEvidence } from "./github.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
 import { detectModules, type Module } from "./modules.ts";
@@ -17,10 +19,12 @@ export interface Target {
   symbols: CodeSymbol[];
   /** Each Module's churn Evidence, keyed by Module path; empty without git history. */
   churn: Map<string, ChurnEvidence>;
+  /** The scripts, CI steps and doc shell blocks the Getting started Section is written from. */
+  setup: SetupEvidence[];
   manifest: Manifest;
 }
 
-/** Loads the config, resolves the Modules, analyses their code and loads the manifest. */
+/** Loads the config, resolves the Modules, analyses their code and setup Evidence, and loads the manifest. */
 export async function openTarget(repoDir: string): Promise<Target> {
   const config = await loadConfig(repoDir);
   if (!config) throw new Error(`no ${CONFIG_FILE} here; run scribe init first`);
@@ -28,8 +32,19 @@ export async function openTarget(repoDir: string): Promise<Target> {
   const sectionIds = uniqueSectionIds(modules);
   const { symbols } = await typescriptAnalyser.analyse(repoDir, modules);
   const churn = churnEvidence(repoDir, modules);
+  const setup = await setupEvidence(repoDir, config.guideDir);
   const manifest = await loadManifest(repoDir);
-  return { config, modules, sectionIds, symbols, churn, manifest };
+  return { config, modules, sectionIds, symbols, churn, setup, manifest };
+}
+
+/** Every Section the Guide should have: one per Module, then Getting started. */
+export function guideSections({ sectionIds }: Target): string[] {
+  return [...sectionIds.values(), GETTING_STARTED];
+}
+
+/** Every piece of Evidence a Section could cite that Scribe can see change without the network, as it is now. */
+export function allEvidence({ symbols, churn, setup }: Target): (FileEvidence | ChurnEvidence)[] {
+  return [...symbols, ...churn.values(), ...setup];
 }
 
 /** Repo-relative path of a Section's file. */
@@ -45,12 +60,12 @@ export function proposalPath(config: Config, section: string): string {
 export const PROPOSAL_SUFFIX = ".proposal.md";
 
 /**
- * Ids of the code and churn Evidence a Section cites that has changed or no
+ * Ids of the Evidence a Section cites whose text has changed or which no
  * longer exists; the Section is Stale if any. GitHub Evidence never counts:
  * `status` makes no network calls, so it can't see GitHub change.
  */
-export function changedEvidence(record: SectionRecord, { symbols, churn }: Pick<Target, "symbols" | "churn">): string[] {
-  const hashes = new Map([...symbols, ...churn.values()].map((e) => [e.id, e.hash]));
+export function changedEvidence(record: SectionRecord, evidence: { id: string; hash: string }[]): string[] {
+  const hashes = new Map(evidence.map((s) => [s.id, s.hash]));
   return record.evidence.filter(({ id, hash }) => !isGitHubEvidence(id) && hashes.get(id) !== hash).map(({ id }) => id);
 }
 
