@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type CodeSymbol, typescriptAnalyser } from "./analyser.ts";
 import { CONFIG_FILE, type Config, loadConfig } from "./config.ts";
+import { GETTING_STARTED, type SetupEvidence, setupEvidence } from "./getting-started.ts";
+import type { FileEvidence } from "./section-writer.ts";
 import { isGitHubEvidence } from "./github.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
 import { detectModules, type Module } from "./modules.ts";
@@ -14,18 +16,31 @@ export interface Target {
   /** Each Module's Section id, which is also its file's path in the Guide, without the extension. */
   sectionIds: Map<Module, string>;
   symbols: CodeSymbol[];
+  /** The scripts, CI steps and doc shell blocks the Getting started Section is written from. */
+  setup: SetupEvidence[];
   manifest: Manifest;
 }
 
-/** Loads the config, resolves the Modules, analyses their code and loads the manifest. */
+/** Loads the config, resolves the Modules, analyses their code and setup Evidence, and loads the manifest. */
 export async function openTarget(repoDir: string): Promise<Target> {
   const config = await loadConfig(repoDir);
   if (!config) throw new Error(`no ${CONFIG_FILE} here; run scribe init first`);
   const modules = config.modules ?? (await detectModules(repoDir));
   const sectionIds = uniqueSectionIds(modules);
   const { symbols } = await typescriptAnalyser.analyse(repoDir, modules);
+  const setup = await setupEvidence(repoDir, config.guideDir);
   const manifest = await loadManifest(repoDir);
-  return { config, modules, sectionIds, symbols, manifest };
+  return { config, modules, sectionIds, symbols, setup, manifest };
+}
+
+/** Every Section the Guide should have: one per Module, then Getting started. */
+export function guideSections({ sectionIds }: Target): string[] {
+  return [...sectionIds.values(), GETTING_STARTED];
+}
+
+/** Every piece of Evidence a Section could cite, as it is now. */
+export function allEvidence({ symbols, setup }: Target): FileEvidence[] {
+  return [...symbols, ...setup];
 }
 
 /** Repo-relative path of a Section's file. */
@@ -41,12 +56,12 @@ export function proposalPath(config: Config, section: string): string {
 export const PROPOSAL_SUFFIX = ".proposal.md";
 
 /**
- * Ids of the symbols a Section cites whose text has changed or which no longer
- * exist; the Section is Stale if any. GitHub Evidence never counts: `status`
- * makes no network calls, so it can't see GitHub change.
+ * Ids of the Evidence a Section cites whose text has changed or which no
+ * longer exists; the Section is Stale if any. GitHub Evidence never counts:
+ * `status` makes no network calls, so it can't see GitHub change.
  */
-export function changedEvidence(record: SectionRecord, symbols: CodeSymbol[]): string[] {
-  const hashes = new Map(symbols.map((s) => [s.id, s.hash]));
+export function changedEvidence(record: SectionRecord, evidence: FileEvidence[]): string[] {
+  const hashes = new Map(evidence.map((s) => [s.id, s.hash]));
   return record.evidence.filter(({ id, hash }) => !isGitHubEvidence(id) && hashes.get(id) !== hash).map(({ id }) => id);
 }
 
