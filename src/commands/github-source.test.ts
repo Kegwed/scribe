@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MODELS } from "../llm.ts";
-import { fakeGitHub } from "../test/fake-github.ts";
+import { type CannedPullRequest, fakeGitHub } from "../test/fake-github.ts";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { generate } from "./generate.ts";
@@ -67,5 +67,92 @@ describe("the GitHub Source", () => {
     expect(b).toContain("Merged into B");
     expect(b).not.toContain("Merged into A");
     expect(github.calls).not.toContain("pullRequest 2");
+  });
+
+  describe("caching", () => {
+    const PULLS: CannedPullRequest[] = [
+      { number: 1, files: ["src/a/a.ts"], comments: ["Why A."] },
+      { number: 2, files: ["src/b/b.ts"], comments: ["Why B."] },
+    ];
+
+    it("asks GitHub nothing when re-run at the same commit", async () => {
+      const repo = createFixtureRepo(TARGET);
+      await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [] }), github: fakeGitHub(PULLS) });
+
+      const github = fakeGitHub(PULLS);
+      await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [] }), github });
+
+      expect(github.calls).toEqual([]);
+    });
+
+    it("after a new commit, lists pull requests again but fetches only new or updated ones", async () => {
+      const repo = createFixtureRepo(TARGET);
+      await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [] }), github: fakeGitHub(PULLS) });
+      repo.commit({ "src/a/a.ts": "export const a = 2;\n" });
+
+      const github = fakeGitHub([
+        { ...PULLS[0]!, updatedAt: "2026-02-01T00:00:00Z" },
+        PULLS[1]!,
+        { number: 3, files: ["src/a/a.ts"] },
+      ]);
+      await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [] }), github });
+
+      expect(github.calls.sort()).toEqual(["pullRequest 1", "pullRequest 3", "pullRequests"]);
+    });
+
+    it("never caches a pull request it can't use", async () => {
+      const repo = createFixtureRepo(TARGET);
+      const broken = fakeGitHub(PULLS);
+      broken.pullRequest = async () => ({ number: 1 }) as never;
+      await expect(generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [] }), github: broken })).rejects.toThrow(/malformed/);
+
+      const github = fakeGitHub(PULLS);
+      await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [] }), github });
+
+      expect(github.calls).toContain("pullRequest 1");
+    });
+  });
+
+  describe("ranking", () => {
+    /** Six merged pull requests touching A, more than a Module is offered; `overrides` sets each one's fields by number. */
+    function sixPulls(overrides: Record<number, Partial<CannedPullRequest>>): CannedPullRequest[] {
+      return [1, 2, 3, 4, 5, 6].map((number) => ({
+        number,
+        files: ["src/a/a.ts"],
+        title: `Pull ${number}`,
+        comments: ["Looks right."],
+        ...overrides[number],
+      }));
+    }
+
+    async function offeredToA(pulls: CannedPullRequest[]): Promise<string> {
+      const repo = createFixtureRepo(TARGET);
+      const llm = scriptedLlm({ paragraphs: [] });
+      await generate(repo.dir, {}, { llm, github: fakeGitHub(pulls) });
+      return writePrompts(llm)[0]!;
+    }
+
+    it("leaves out the pull request with the shortest review discussion", async () => {
+      const prompt = await offeredToA(sixPulls({
+        1: { title: "Quiet pull", comments: [] },
+        2: { comments: ["One.", "Two.", "Three."] },
+        3: { comments: ["One.", "Two.", "Three."] },
+        4: { comments: ["One.", "Two.", "Three."] },
+        5: { comments: ["One.", "Two.", "Three."] },
+        6: { comments: ["One.", "Two.", "Three."] },
+      }));
+
+      expect(prompt).not.toContain("Quiet pull");
+      expect(prompt).toContain("Pull 2");
+      expect(prompt).toContain("Pull 6");
+    });
+
+    it("leaves out the oldest pull request among equal discussions", async () => {
+      const prompt = await offeredToA(sixPulls({ 4: { title: "Old pull", mergedAt: "2020-01-01T00:00:00Z" } }));
+
+      expect(prompt).not.toContain("Old pull");
+      expect(prompt).toContain("Pull 1");
+      expect(prompt).toContain("Pull 6");
+    });
   });
 });

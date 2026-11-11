@@ -19,17 +19,48 @@ export function isGitHubEvidence(id: string): boolean {
   return id.startsWith(GITHUB_EVIDENCE);
 }
 
-/** GitHub Evidence for each Module, keyed by Module path, from the merged pull requests that touched its files. */
+/** How many pull requests, with their linked issues, each Module Section is offered. */
+export const PULL_REQUESTS_PER_MODULE = 5;
+/** A pull request's rank halves for each year it was merged before the newest one. */
+const RANK_HALF_LIFE_DAYS = 365;
+
+/**
+ * GitHub Evidence for each Module, keyed by Module path: the discussion on the
+ * merged pull requests that touched its files, and the issues they link to,
+ * from the highest-ranked pull requests only.
+ */
 export async function gitHubEvidence(github: GitHub, modules: Module[]): Promise<Map<string, GitHubEvidence[]>> {
-  const evidence = new Map<string, GitHubEvidence[]>(modules.map((m) => [m.path, []]));
-  for (const summary of await github.pullRequests()) {
-    if (summary.mergedAt === null) continue;
-    const touched = new Set(summary.files.flatMap((file) => moduleOf(file, modules)?.path ?? []));
-    if (touched.size === 0) continue;
-    const items = discussionOf(await github.pullRequest(summary.number));
-    for (const path of touched) evidence.get(path)!.push(...items);
+  const merged = (await github.pullRequests()).filter((pr) => pr.mergedAt !== null);
+  const rank = ranking(merged);
+  const chosen = new Map<string, PullRequestSummary[]>(modules.map((m) => [m.path, []]));
+  for (const summary of merged) {
+    for (const file of summary.files) {
+      const pulls = chosen.get(moduleOf(file, modules)?.path ?? "");
+      if (pulls && !pulls.includes(summary)) pulls.push(summary);
+    }
+  }
+
+  const details = new Map<number, Promise<GitHubEvidence[]>>();
+  const evidence = new Map<string, GitHubEvidence[]>();
+  for (const [path, pulls] of chosen) {
+    const top = pulls.sort((a, b) => rank(b) - rank(a) || b.number - a.number).slice(0, PULL_REQUESTS_PER_MODULE);
+    for (const { number } of top) {
+      if (!details.has(number)) details.set(number, github.pullRequest(number).then(discussionOf));
+    }
+    evidence.set(path, (await Promise.all(top.map(({ number }) => details.get(number)!))).flat());
   }
   return evidence;
+}
+
+/**
+ * Ranks pull requests by review discussion, discounted by how long before the
+ * newest of them each was merged. Measured from the newest rather than today,
+ * so the ranking, and the prompts it feeds, don't change while nothing merges.
+ */
+function ranking(merged: PullRequestSummary[]): (pr: PullRequestSummary) => number {
+  const time = (pr: PullRequestSummary) => Date.parse(pr.mergedAt!);
+  const newest = Math.max(...merged.map(time));
+  return (pr) => (1 + pr.reviewComments) * 0.5 ** ((newest - time(pr)) / (RANK_HALF_LIFE_DAYS * 86_400_000));
 }
 
 function discussionOf(pr: PullRequest): GitHubEvidence[] {
