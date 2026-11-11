@@ -341,6 +341,29 @@ describe("adopt", () => {
     });
   });
 
+  it("adopts a human's Overview, recording the repo-wide Evidence the verifier confirms", async () => {
+    const repo = await generated();
+    const mine = "# Overview\n\nThe repo has two Modules.\n";
+    repo.commit({ "docs/guide/overview.md": mine });
+
+    const result = await adopt(repo.dir, "overview", {}, { llm: scriptedLlm("unused", {}, { attachments: { "The repo has two Modules.": ["graph:modules"] } }) });
+
+    expect(result.unsupportedClaims).toEqual([]);
+    expect(read(repo.dir, "docs/guide/overview.md")).toBe(mine);
+    expect(manifest(repo.dir).sections.overview.evidence.map((e: { id: string }) => e.id)).toEqual(["graph:modules"]);
+    expect((await status(repo.dir)).sections.find((s) => s.section === "overview")).toEqual(expect.objectContaining({ frozen: false, stale: false }));
+  });
+
+  it("refuses a Section whose file can't be read, naming it, and records nothing", async () => {
+    const repo = await generated();
+    repo.git("rm", "--quiet", A);
+    repo.commit({ [`${A}/notes.txt`]: "A directory where the Section's file was.\n" });
+    const before = manifest(repo.dir).sections["modules/src-a"];
+
+    await expect(adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused") })).rejects.toThrow(/can't read docs\/guide\/modules\/src-a\.md/);
+    expect(manifest(repo.dir).sections["modules/src-a"]).toEqual(before);
+  });
+
   it("refuses a Section whose file is gone, pointing to scribe reset", async () => {
     const repo = await generated();
     repo.git("rm", "--quiet", A);

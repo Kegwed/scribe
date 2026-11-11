@@ -124,6 +124,41 @@ describe("reset", () => {
     expect(repo.git("status", "--porcelain")).toBe("");
   });
 
+  it("regenerates a Stale Section no human edited from the code, not as a revision", async () => {
+    const repo = await generated();
+    repo.commit({ "src/a/a.ts": CHANGED_A });
+    const llm = scriptedLlm(A_TWO);
+
+    await reset(repo.dir, "modules/src-a", {}, { llm });
+
+    expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "A returns two.[^1] K is three.[^2]", ["[^1]: src/a/a.ts (a)", "[^2]: src/a/a.ts (k)"]));
+    expect(llm.calls.some((call) => call.prompt.includes("<current-section>"))).toBe(false);
+    expect((await status(repo.dir)).sections.find((s) => s.section === "modules/src-a")).toEqual(expect.objectContaining({ frozen: false, stale: false }));
+  });
+
+  it("discards a human's edits to a top-level Section, regenerating it", async () => {
+    const repo = await generated();
+    const written = read(repo.dir, "docs/guide/overview.md");
+    repo.commit({ "docs/guide/overview.md": "# Overview\n\nMine.\n" });
+
+    // Written from the same request generate made, so from the cache.
+    await reset(repo.dir, "overview", {}, { llm: scriptedLlm("unused") });
+
+    expect(read(repo.dir, "docs/guide/overview.md")).toBe(written);
+    expect((await status(repo.dir)).sections.find((s) => s.section === "overview")).toEqual(expect.objectContaining({ frozen: false, stale: false }));
+  });
+
+  it("refuses a Section whose file can't be read, naming it, and writes nothing", async () => {
+    const repo = await generated();
+    repo.git("rm", "--quiet", A);
+    repo.commit({ [`${A}/notes.txt`]: "A directory where the Section's file was.\n" });
+    const llm = scriptedLlm("unused");
+
+    await expect(reset(repo.dir, "modules/src-a", {}, { llm })).rejects.toThrow(/can't read docs\/guide\/modules\/src-a\.md/);
+    expect(llm.calls).toEqual([]);
+    expect(repo.git("status", "--porcelain")).toBe("");
+  });
+
   it("refuses a Section no current Module has, such as a removed Module's", async () => {
     const repo = await generated();
     repo.commit({ "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }) });

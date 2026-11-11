@@ -114,10 +114,15 @@ export function changedEvidence(record: SectionRecord, evidence: { id: string; h
   return [...new Set(cited.filter(({ id, hash }) => !isGitHubEvidence(id) && hashes.get(id) !== hash).map(({ id }) => id))];
 }
 
-/** A Section file's content, or undefined if it doesn't exist. */
+/** A Section file's content, or undefined if it doesn't exist; throws, naming it, if it can't be read. */
 export async function readSection(repoDir: string, path: string): Promise<string | undefined> {
   const file = join(repoDir, path);
-  return existsSync(file) ? await readFile(file, "utf8") : undefined;
+  if (!existsSync(file)) return undefined;
+  try {
+    return await readFile(file, "utf8");
+  } catch (error) {
+    throw new Error(`can't read ${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 /** The Module whose Section is `section`; throws if no current Module has it. */
