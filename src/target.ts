@@ -90,6 +90,11 @@ export function guideSection(target: Target, section: string): Module | undefine
   return [...target.sectionIds].find(([, id]) => id === section)?.[0];
 }
 
+/** Whether a Section cites GitHub Evidence: a Module's Section, whose Module is `module`, or Key decisions. */
+export function drawsOnGitHub(section: string, module: Module | undefined): boolean {
+  return module !== undefined || section === KEY_DECISIONS;
+}
+
 /** Deletes a Section's pending Proposal; returns its repo-relative path, or undefined if there was none. */
 export async function clearProposal(repoDir: string, config: Config, section: string): Promise<string | undefined> {
   const path = proposalPath(config, section);

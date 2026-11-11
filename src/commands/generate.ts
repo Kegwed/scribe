@@ -20,7 +20,8 @@ export interface GenerateResult extends WriteReport {
 }
 
 /**
- * Writes one Section per Module and a Getting started Section, each Claim
+ * Writes one Section per Module, a Getting started Section and a Key
+ * decisions Section from the ADRs and pull request threads, each Claim
  * citing the Evidence it rests on and verified against it, and records what
  * was written in the manifest. Every command Getting started names must be one
  * the repo's scripts, CI steps or docs give. Sections a human has edited are
