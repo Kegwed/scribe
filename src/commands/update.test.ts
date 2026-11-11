@@ -144,7 +144,7 @@ describe("update's cost estimate", () => {
     expect(result.estimate).toEqual({
       sections: [{ section: "modules/src-a", tokens: 0, dollars: 0, unpriced: [] }], tokens: 0, dollars: 0, unpriced: [],
     });
-    expect(read(repo.dir, A)).toBe("# A\n\nA returns two.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+    expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "A returns two.[^1]", ["[^1]: src/a/a.ts (a)"]));
   });
 });
 
