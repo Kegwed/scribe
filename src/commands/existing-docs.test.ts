@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
+import { stableSection } from "../test/sections.ts";
 import { adopt } from "./adopt.ts";
 import { generate } from "./generate.ts";
 import { status } from "./status.ts";
@@ -45,17 +46,12 @@ describe("existing docs as a Source", () => {
 
     await generate(repo.dir, {}, { llm });
 
-    expect(read(repo.dir, SECTION)).toBe([
-      "# Auth",
-      "",
-      "Sessions start with createSession.[^1][^2]",
-      "",
+    expect(read(repo.dir, SECTION)).toBe(stableSection("Auth", "src/auth", "Sessions start with createSession.[^1][^2]", [
       "[^1]: README.md (Sessions)",
       "[^2]: src/auth/session.ts (createSession)",
-      "",
-    ].join("\n"));
+    ]));
     const { evidence } = JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections["modules/src-auth"];
-    expect(evidence.map((e: { id: string }) => e.id)).toEqual(["README.md#sessions", "src/auth/session.ts#createSession"]);
+    expect(evidence.map((e: { id: string }) => e.id)).toEqual(["README.md#sessions", "src/auth/session.ts#createSession", "history:src/auth"]);
   });
 
   describe("staleness", () => {

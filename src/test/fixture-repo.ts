@@ -8,8 +8,8 @@ export type Files = Record<string, string>;
 
 export interface FixtureRepo {
   dir: string;
-  /** Writes the files and commits them. */
-  commit(files: Files, message?: string): void;
+  /** Writes the files and commits them, dated `date` (any format git accepts) if given. */
+  commit(files: Files, message?: string, date?: string): void;
   git(...args: string[]): string;
 }
 
@@ -33,14 +33,15 @@ export function createFixtureRepo(files: Files = {}): FixtureRepo {
   const repo: FixtureRepo = {
     dir,
     git,
-    commit(files, message = "fixture commit") {
+    commit(files, message = "fixture commit", date) {
       for (const [path, content] of Object.entries(files)) {
         const full = join(dir, path);
         mkdirSync(dirname(full), { recursive: true });
         writeFileSync(full, content);
       }
       git("add", "--all");
-      git("commit", "--quiet", "--allow-empty", "-m", message);
+      const env = date ? { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : process.env;
+      execFileSync("git", ["commit", "--quiet", "--allow-empty", "-m", message], { cwd: dir, encoding: "utf8", env });
     },
   };
   repo.commit(files, "initial commit");
