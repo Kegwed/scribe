@@ -70,12 +70,13 @@ describe("status", () => {
 
   it("reports a Section Stale when its Module turns hot, and not for commits that leave it stable", async () => {
     const repo = await generated();
+    const moduleSections = async () => (await status(repo.dir)).sections.filter((s) => s.section.startsWith("modules/"));
     for (let i = 0; i < 3; i++) repo.commit({ "src/a/notes.md": `change ${i}\n` });
-    expect((await status(repo.dir)).sections.map((s) => s.stale)).toEqual([false, false]);
+    expect((await moduleSections()).map((s) => s.stale)).toEqual([false, false]);
 
     repo.commit({ "src/a/notes.md": "one more\n" });
 
-    expect((await status(repo.dir)).sections).toEqual([
+    expect(await moduleSections()).toEqual([
       expect.objectContaining({ section: "modules/src-a", stale: true, changedEvidence: ["history:src/a"] }),
       expect.objectContaining({ section: "modules/src-b", stale: false }),
     ]);
