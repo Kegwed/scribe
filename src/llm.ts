@@ -5,12 +5,19 @@ import Anthropic from "@anthropic-ai/sdk";
 import { contentHash } from "./hash.ts";
 import { CACHE_DIR } from "./manifest.ts";
 
-/** Sonnet writes Sections; Haiku does bulk summarisation and verification (ADR-0003). */
-export const MODELS = {
+/** The model Scribe uses for each kind of request. */
+export interface Models {
+  write: string;
+  summarise: string;
+  verify: string;
+}
+
+/** Sonnet writes Sections; Haiku does bulk summarisation and verification (ADR-0003). Config can override each. */
+export const MODELS: Readonly<Models> = {
   write: "claude-sonnet-5-5",
   summarise: "claude-haiku-5-5",
   verify: "claude-haiku-5-5",
-} as const;
+};
 
 export interface LlmRequest {
   model: string;

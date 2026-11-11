@@ -3,7 +3,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { CodeSymbol } from "./analyser.ts";
 import { contentHash } from "./hash.ts";
-import { completeCached, type Llm, MODELS } from "./llm.ts";
+import { modelsOf } from "./config.ts";
+import { completeCached, type Llm } from "./llm.ts";
 import { saveManifest } from "./manifest.ts";
 import type { Module } from "./modules.ts";
 import { proposalPath, readSection, sectionPath, type Target } from "./target.ts";
@@ -46,6 +47,7 @@ export interface SectionWriter {
 export function sectionWriter(repoDir: string, target: Target, llm: Llm, report: WriteReport): SectionWriter {
   const { config, sectionIds, symbols, manifest } = target;
   const permalinks = githubPermalinks(repoDir);
+  const models = modelsOf(config);
 
   /** A Module's Section, verified, with the symbols it cites; revised from `existing` given `changedEvidence`. */
   async function compose(module: Module, existing: string | undefined, changedEvidence: string[] | undefined, proposal?: true) {
@@ -57,7 +59,7 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
     const buildPrompt = (rendered: string[]) => changedEvidence && existing !== undefined && record
       ? revisionPrompt(module, rendered, present, citingIds(existing, record.evidence.map((e) => e.id)), changedEvidence)
       : sectionPrompt(module, rendered);
-    const fitted = await fitPrompt(llm, repoDir, moduleSymbols, buildPrompt);
+    const fitted = await fitPrompt(llm, models.summarise, repoDir, moduleSymbols, buildPrompt);
     if (fitted.summarised.length > 0 || fitted.leftOut.length > 0) {
       const { summarised, leftOut } = fitted;
       report.reduced.push({ section, summarised, leftOut, ...(proposal ? { proposal } : {}) });
@@ -67,12 +69,12 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
 
     const evidence = new Map(fitted.sent.map((s) => [s.id, s]));
     const writeSection = (prompt: string) =>
-      completeCached(llm, repoDir, { model: MODELS.write, system, prompt, schema: SECTION_SCHEMA }, parseSection);
+      completeCached(llm, repoDir, { model: models.write, system, prompt, schema: SECTION_SCHEMA }, parseSection);
     let written: SectionResponse = evidence.size === 0 ? { paragraphs: [] } : await writeSection(firstPrompt);
-    let failures = await verifySection(llm, repoDir, written, evidence);
+    let failures = await verifySection(llm, models.verify, repoDir, written, evidence);
     if (failures.size > 0) {
       written = await writeSection(repairPrompt(firstPrompt, written, failures));
-      failures = await verifySection(llm, repoDir, written, evidence);
+      failures = await verifySection(llm, models.verify, repoDir, written, evidence);
     }
     const { paragraphs } = written;
 
@@ -200,6 +202,7 @@ interface SectionResponse {
 /** Why each Claim failed verification; a Claim not listed is confirmed by its cited Evidence. */
 async function verifySection(
   llm: Llm,
+  model: string,
   repoDir: string,
   { paragraphs }: SectionResponse,
   evidence: Map<string, CodeSymbol>,
@@ -209,7 +212,7 @@ async function verifySection(
     const cited = [...new Set(claim.evidence)].flatMap((id) => evidence.get(id) ?? []);
     if (cited.length === 0) return "cites no Evidence from this Module";
     const { confirmed, reason } = await completeCached(llm, repoDir, {
-      model: MODELS.verify,
+      model,
       system: VERIFY_SYSTEM,
       prompt: verifyPrompt(claim, cited),
       schema: VERDICT_SCHEMA,
@@ -318,7 +321,13 @@ interface FittedPrompt {
  * left out, internal ones first and the largest first. A symbol too large even
  * for a summary request is left out at once.
  */
-async function fitPrompt(llm: Llm, repoDir: string, symbols: CodeSymbol[], build: (rendered: string[]) => string): Promise<FittedPrompt> {
+async function fitPrompt(
+  llm: Llm,
+  model: string,
+  repoDir: string,
+  symbols: CodeSymbol[],
+  build: (rendered: string[]) => string,
+): Promise<FittedPrompt> {
   const limit = llm.promptLimit;
   const rendered = symbols.map(renderSymbol);
   const fits = () => build(rendered.filter((r) => r !== "")).length <= limit;
@@ -341,7 +350,7 @@ async function fitPrompt(llm: Llm, repoDir: string, symbols: CodeSymbol[], build
   }
   const summaries = await Promise.all(toSummarise.map((i) =>
     completeCached(llm, repoDir, {
-      model: MODELS.summarise,
+      model,
       system: SUMMARY_SYSTEM,
       prompt: renderSymbol(symbols[i]!),
       schema: SUMMARY_SCHEMA,

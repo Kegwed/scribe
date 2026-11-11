@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { claudeLlm, type Llm, type LlmRequest, MODELS, PROMPT_LIMIT, requestKey } from "../llm.ts";
+import { claudeLlm, type Llm, type LlmRequest, PROMPT_LIMIT, requestKey } from "../llm.ts";
 import { SUMMARY_SYSTEM } from "../section-writer.ts";
 
 const CASSETTES = join(dirname(fileURLToPath(import.meta.url)), "cassettes");
@@ -71,7 +71,7 @@ export function scriptedLlm(
           setTimeout(() => waiting.splice(0).reverse().forEach((next, i) => setTimeout(next, i * 50)));
         }
       });
-      if (request.model === MODELS.write) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
+      if (isSectionWrite(request)) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
       if (request.system === SUMMARY_SYSTEM) {
         const id = request.prompt.match(/<symbol id="([^"]*)"/)?.[1] ?? "";
         return asResponseText({ summary: id in summaries ? summaries[id] : `Summary of ${id}.` });
@@ -80,6 +80,11 @@ export function scriptedLlm(
       return asResponseText(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);
     },
   };
+}
+
+/** Whether a request asks for a Section rather than a verdict; told apart by schema, since config can change either's model. */
+export function isSectionWrite(request: LlmRequest): boolean {
+  return "paragraphs" in ((request.schema.properties as object | undefined) ?? {});
 }
 
 function asResponseText(response: unknown): string {
