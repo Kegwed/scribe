@@ -1,0 +1,3 @@
+#!/bin/sh
+# Typecheck only: the full suite takes about 95s. npm run check runs everything.
+exec npm run --silent typecheck

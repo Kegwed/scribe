@@ -1,8 +1,8 @@
 name: Check
 
+# Every branch, so an integration branch is checked as soon as it's pushed, before any PR.
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
@@ -15,11 +15,4 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Warn about hand-written cassettes
-        run: |
-          for file in $(grep -l '"_handwritten"' src/test/cassettes/*.json); do
-            echo "::warning file=$file::hand-written LLM responses; replace them with npm run record"
-          done
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
+      - run: npm run check

@@ -17,8 +17,10 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "check": "npm run typecheck && npm run build && node scripts/check-recordings.mjs",
     "record": "node scripts/record-cassettes.mjs",
-    "eval": "node scripts/eval.mjs"
+    "eval": "node scripts/eval.mjs",
+    "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
