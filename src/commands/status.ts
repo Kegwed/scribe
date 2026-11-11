@@ -1,16 +1,15 @@
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { typescriptAnalyser } from "../analyser.ts";
-import { CONFIG_FILE, loadConfig } from "../config.ts";
-import { isFrozen, loadManifest } from "../manifest.ts";
-import { detectModules } from "../modules.ts";
+import { isFrozen } from "../manifest.ts";
+import { changedEvidence, isModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
 
 export interface SectionStatus {
   section: string;
   /** Repo-relative path of the Section's file. */
   file: string;
-  /** The Section's file is gone; `generate` writes it again. */
+  /** The Section's Module was added since Scribe last wrote the Guide, and has no Section yet; `update` writes one. */
+  added: boolean;
+  /** The Section's Module no longer exists; `update` drops its record and leaves its file for a human to delete. */
+  removed: boolean;
+  /** The Section's file is gone; `generate` and `update` write it again. */
   missing: boolean;
   /** A human has edited the Section since Scribe last wrote it (ADR-0002). */
   frozen: boolean;
@@ -25,29 +24,32 @@ export interface StatusResult {
 }
 
 /**
- * Reports which Sections in the manifest are Stale, Frozen, or both, by
- * hashing the Target repo as it is now. Calls no LLM and no network service.
+ * Reports each Section in the manifest as Stale, Frozen, missing or removed,
+ * and each Module without one as added, by hashing the Target repo as it is
+ * now. Calls no LLM and no network service.
  */
 export async function status(repoDir: string): Promise<StatusResult> {
-  const config = await loadConfig(repoDir);
-  if (!config) throw new Error(`no ${CONFIG_FILE} here; run scribe init first`);
-  const modules = config.modules ?? (await detectModules(repoDir));
-  const { symbols } = await typescriptAnalyser.analyse(repoDir, modules);
-  const hashes = new Map(symbols.map((s) => [s.id, s.hash]));
-  const manifest = await loadManifest(repoDir);
+  const { config, sectionIds, symbols, manifest } = await openTarget(repoDir);
+  const current = new Set(sectionIds.values());
 
-  const sections = await Promise.all(Object.entries(manifest.sections).map(async ([section, record]) => {
-    const file = join(repoDir, record.file);
-    const content = existsSync(file) ? await readFile(file, "utf8") : undefined;
-    const changedEvidence = record.evidence.filter(({ id, hash }) => hashes.get(id) !== hash).map(({ id }) => id);
+  const recorded = await Promise.all(Object.entries(manifest.sections).map(async ([section, record]) => {
+    const content = await readSection(repoDir, record.file);
+    const changed = changedEvidence(record, symbols);
     return {
       section,
       file: record.file,
+      added: false,
+      removed: isModuleSection(section) && !current.has(section),
       missing: content === undefined,
       frozen: isFrozen(content, record),
-      stale: changedEvidence.length > 0,
-      changedEvidence,
+      stale: changed.length > 0,
+      changedEvidence: changed,
     };
   }));
-  return { sections };
+  const unrecorded = await Promise.all([...current].filter((section) => !manifest.sections[section]).map(async (section) => {
+    const file = sectionPath(config, section);
+    const frozen = isFrozen(await readSection(repoDir, file), undefined);
+    return { section, file, added: !frozen, removed: false, missing: false, frozen, stale: false, changedEvidence: [] };
+  }));
+  return { sections: [...recorded, ...unrecorded] };
 }

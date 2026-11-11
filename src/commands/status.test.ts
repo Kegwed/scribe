@@ -29,8 +29,8 @@ describe("status", () => {
     const { sections } = await status(repo.dir);
 
     expect(sections).toEqual([
-      { section: "modules/src-a", file: "docs/guide/modules/src-a.md", missing: false, frozen: false, stale: false, changedEvidence: [] },
-      { section: "modules/src-b", file: "docs/guide/modules/src-b.md", missing: false, frozen: false, stale: false, changedEvidence: [] },
+      { section: "modules/src-a", file: "docs/guide/modules/src-a.md", added: false, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
+      { section: "modules/src-b", file: "docs/guide/modules/src-b.md", added: false, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
     ]);
   });
 
@@ -83,6 +83,47 @@ describe("status", () => {
     const { sections } = await status(repo.dir);
 
     expect(sections[0]).toMatchObject({ section: "modules/src-a", frozen: true, stale: true });
+  });
+
+  it("reports a Module added since generate as needing a Section", async () => {
+    const repo = await generated();
+    repo.commit({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }, { name: "B", path: "src/b" }, { name: "C", path: "src/c" }] }),
+      "src/c/c.ts": "export const c = 1;\n",
+    });
+
+    const { sections } = await status(repo.dir);
+
+    expect(sections).toEqual([
+      expect.objectContaining({ section: "modules/src-a", added: false }),
+      expect.objectContaining({ section: "modules/src-b", added: false }),
+      { section: "modules/src-c", file: "docs/guide/modules/src-c.md", added: true, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
+    ]);
+  });
+
+  it("reports an added Module whose file a human already wrote as Frozen, not added", async () => {
+    const repo = await generated();
+    repo.commit({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }, { name: "B", path: "src/b" }, { name: "C", path: "src/c" }] }),
+      "docs/guide/modules/src-c.md": "# C\n\nMine.\n",
+    });
+
+    const { sections } = await status(repo.dir);
+
+    expect(sections[2]).toMatchObject({ section: "modules/src-c", added: false, frozen: true });
+  });
+
+  it("reports the Section of a removed Module", async () => {
+    const repo = await generated();
+    repo.git("rm", "--quiet", "-r", "src/b");
+    repo.commit({ "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }) });
+
+    const { sections } = await status(repo.dir);
+
+    expect(sections).toEqual([
+      expect.objectContaining({ section: "modules/src-a", removed: false }),
+      expect.objectContaining({ section: "modules/src-b", removed: true }),
+    ]);
   });
 
   it("asks for scribe init when the repo has no config", async () => {

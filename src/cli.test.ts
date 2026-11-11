@@ -81,6 +81,55 @@ describe("scribe status", () => {
     expect(stdout).toBe("Missing: modules/src-b\n");
     expect(status).toBe(1);
   });
+
+  it("lists a Module added since generate as needing a Section and exits non-zero", async () => {
+    const repo = await generated();
+    repo.commit({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }, { name: "B", path: "src/b" }, { name: "C", path: "src/c" }] }),
+    });
+
+    const { status, stdout } = scribe(repo.dir, "status");
+
+    expect(stdout).toBe("Module added, no Section yet: modules/src-c\n");
+    expect(status).toBe(1);
+  });
+
+  it("lists the Section of a removed Module and exits non-zero", async () => {
+    const repo = await generated();
+    repo.commit({ "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }) });
+
+    const { status, stdout } = scribe(repo.dir, "status");
+
+    expect(stdout).toBe("Module removed: modules/src-b\n");
+    expect(status).toBe(1);
+  });
+});
+
+describe("scribe update", () => {
+  it("reports a removed Module's Section, after which status is clean", async () => {
+    const repo = createFixtureRepo({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }, { name: "B", path: "src/b" }] }),
+      "src/a/a.ts": "export const a = 1;\n",
+      "src/b/b.ts": "export const b = 1;\n",
+    });
+    await generate(repo.dir, {}, {
+      llm: scriptedLlm([
+        { paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] },
+        { paragraphs: [{ claims: [{ text: "B is one.", evidence: ["src/b/b.ts#b"] }] }] },
+      ]),
+    });
+    repo.commit({ "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }) });
+
+    const update = scribe(repo.dir, "update");
+
+    expect(update.stdout).toBe([
+      "Module removed: modules/src-b; delete docs/guide/modules/src-b.md if it is no longer wanted.",
+      "Guide updated.",
+      "",
+    ].join("\n"));
+    expect(update.status).toBe(0);
+    expect(scribe(repo.dir, "status").stdout).toBe("All 1 Section current.\n");
+  });
 });
 
 it("scribe init prints the detected Modules and their public surface", () => {
