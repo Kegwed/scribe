@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
+import { fakeGitHub } from "../test/fake-github.ts";
 import { recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { adopt } from "./adopt.ts";
 import { generate } from "./generate.ts";
@@ -117,7 +118,7 @@ describe("adopt", () => {
     const result = await adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused", {}, { "A returns two.": ["src/a/a.ts#a"] }) });
 
     expect(existsSync(join(repo.dir, A_PROPOSAL))).toBe(false);
-    expect(result).toEqual({ unsupportedClaims: [], clearedProposal: A_PROPOSAL });
+    expect(result).toEqual({ unsupportedClaims: [], clearedProposal: A_PROPOSAL, warnings: [] });
     expect(read(repo.dir, A)).toBe(mine);
     const after = await status(repo.dir);
     expect(after.sections.find((s) => s.section === "modules/src-a")).toEqual(expect.objectContaining({ frozen: false, stale: false }));
@@ -176,6 +177,18 @@ describe("adopt", () => {
     expect((await status(repo.dir)).sections.find((s) => s.section === "modules/src-a")).toEqual(
       expect.objectContaining({ frozen: false, stale: false }),
     );
+  });
+
+  it("records a review comment as Evidence for a human's Claim when GitHub is connected", async () => {
+    const repo = await generated();
+    repo.commit({ [A]: "# A\n\nK stays a constant because callers cache it.\n" });
+    const github = fakeGitHub([{ number: 12, files: ["src/a/a.ts"], comments: ["Keep k a constant: callers cache it."] }]);
+    const llm = scriptedLlm("unused", {}, { "K stays a constant because callers cache it.": ["src/a/a.ts#k", "github:pr/12/comment/1201"] });
+
+    const result = await adopt(repo.dir, "modules/src-a", {}, { llm, github });
+
+    expect(result.unsupportedClaims).toEqual([]);
+    expect(manifest(repo.dir).sections["modules/src-a"].evidence.map((e: { id: string }) => e.id)).toEqual(["src/a/a.ts#k", "github:pr/12/comment/1201"]);
   });
 
   it("records every Claim Unsupported, asking no LLM, when the Module has no symbols", async () => {

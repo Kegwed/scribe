@@ -1,4 +1,5 @@
 import type { Adapters } from "../adapters.ts";
+import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR, isFrozen, saveManifest } from "../manifest.ts";
 import type { Module } from "../modules.ts";
 import { type Confirm, confirmed, type CostEstimate, emptyReport, sectionWriter, totalCost, type WriteReport } from "../section-writer.ts";
@@ -36,11 +37,12 @@ type Planned =
 export async function update(
   repoDir: string,
   { confirm }: UpdateOptions,
-  { llm }: Pick<Adapters, "llm">,
+  { llm, github }: Adapters,
 ): Promise<UpdateResult> {
   const target = await openTarget(repoDir);
   const report = emptyReport();
-  const writer = sectionWriter(repoDir, target, llm, report);
+  const discussions = github && (await gitHubEvidence(repoDir, github, target.modules, report.warnings));
+  const writer = sectionWriter(repoDir, target, llm, report, discussions);
 
   const { sections } = target.manifest;
   const removed = Object.entries(sections)

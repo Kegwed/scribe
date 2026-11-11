@@ -1,4 +1,5 @@
 import type { Adapters } from "../adapters.ts";
+import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR } from "../manifest.ts";
 import { emptyReport, sectionWriter } from "../section-writer.ts";
 import { clearProposal, openTarget, readSection, sectionModule, sectionPath } from "../target.ts";
@@ -11,6 +12,8 @@ export interface AdoptResult {
   unsupportedClaims: { section: string; text: string }[];
   /** The Section's pending Proposal, deleted because the adopted text is now the baseline. */
   clearedProposal?: string;
+  /** Problems the maintainer should fix by hand, such as GitHub being unreachable. */
+  warnings: string[];
 }
 
 /**
@@ -22,7 +25,7 @@ export async function adopt(
   repoDir: string,
   section: string,
   _options: AdoptOptions,
-  { llm }: Pick<Adapters, "llm">,
+  { llm, github }: Adapters,
 ): Promise<AdoptResult> {
   const target = await openTarget(repoDir);
   const module = sectionModule(target, section);
@@ -31,10 +34,13 @@ export async function adopt(
   if (content === undefined) throw new Error(`${path} doesn't exist, so there is nothing to adopt; scribe reset ${section} writes it`);
   await gitIgnore(repoDir, CACHE_DIR);
 
-  const unsupported = await sectionWriter(repoDir, target, llm, emptyReport()).adopt(module, content);
+  const report = emptyReport();
+  const discussions = github && (await gitHubEvidence(repoDir, github, [module], report.warnings));
+  const unsupported = await sectionWriter(repoDir, target, llm, report, discussions).adopt(module, content);
   const clearedProposal = await clearProposal(repoDir, target.config, section);
   return {
     unsupportedClaims: unsupported.map((text) => ({ section, text })),
     ...(clearedProposal ? { clearedProposal } : {}),
+    warnings: report.warnings,
   };
 }

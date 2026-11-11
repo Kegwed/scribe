@@ -3,6 +3,7 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type CodeSymbol, typescriptAnalyser } from "./analyser.ts";
 import { CONFIG_FILE, type Config, loadConfig } from "./config.ts";
+import { isGitHubEvidence } from "./github.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
 import { detectModules, type Module } from "./modules.ts";
 
@@ -39,10 +40,14 @@ export function proposalPath(config: Config, section: string): string {
 
 export const PROPOSAL_SUFFIX = ".proposal.md";
 
-/** Ids of the symbols a Section cites whose text has changed or which no longer exist; the Section is Stale if any. */
+/**
+ * Ids of the symbols a Section cites whose text has changed or which no longer
+ * exist; the Section is Stale if any. GitHub Evidence never counts: `status`
+ * makes no network calls, so it can't see GitHub change.
+ */
 export function changedEvidence(record: SectionRecord, symbols: CodeSymbol[]): string[] {
   const hashes = new Map(symbols.map((s) => [s.id, s.hash]));
-  return record.evidence.filter(({ id, hash }) => hashes.get(id) !== hash).map(({ id }) => id);
+  return record.evidence.filter(({ id, hash }) => !isGitHubEvidence(id) && hashes.get(id) !== hash).map(({ id }) => id);
 }
 
 /** A Section file's content, or undefined if it doesn't exist. */

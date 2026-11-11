@@ -7,6 +7,8 @@ import { status } from "./commands/status.ts";
 import { update } from "./commands/update.ts";
 import { CONFIG_FILE } from "./config.ts";
 import { createInterface } from "node:readline";
+import type { Adapters } from "./adapters.ts";
+import { connectGitHub } from "./github.ts";
 import { claudeLlm } from "./llm.ts";
 import type { Confirm } from "./section-writer.ts";
 
@@ -49,6 +51,12 @@ function cancelled(): number {
   return 1;
 }
 
+/** Claude, and GitHub when `origin` is on it and `gh` is signed in. */
+function adapters(): Adapters {
+  const github = connectGitHub(process.cwd());
+  return { llm: claudeLlm(), ...(github ? { github } : {}) };
+}
+
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   const flags = rest.filter((arg) => arg.startsWith("-"));
@@ -73,7 +81,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "generate": {
-      const { declined, droppedClaims, frozen, warnings } = await generate(process.cwd(), { confirm: confirmer(yes) }, { llm: claudeLlm() });
+      const { declined, droppedClaims, frozen, warnings } = await generate(process.cwd(), { confirm: confirmer(yes) }, adapters());
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
       if (declined) return cancelled();
@@ -82,7 +90,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "update": {
-      const { declined, droppedClaims, frozen, proposals, removed, warnings } = await update(process.cwd(), { confirm: confirmer(yes) }, { llm: claudeLlm() });
+      const { declined, droppedClaims, frozen, proposals, removed, warnings } = await update(process.cwd(), { confirm: confirmer(yes) }, adapters());
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
       if (declined) return cancelled();
@@ -113,14 +121,15 @@ async function main(argv: string[]): Promise<number> {
       return proposals.length > 0 || sections.some((s) => s.added || s.removed || s.missing || s.stale) ? 1 : 0;
     }
     case "adopt": {
-      const { unsupportedClaims, clearedProposal } = await adopt(process.cwd(), section!, {}, { llm: claudeLlm() });
+      const { unsupportedClaims, clearedProposal, warnings } = await adopt(process.cwd(), section!, {}, adapters());
+      for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const { text } of unsupportedClaims) console.log(`Unsupported Claim, kept: ${text}`);
       if (clearedProposal) console.log(`Proposal deleted: ${clearedProposal}`);
       console.log(`Adopted ${section}.`);
       return 0;
     }
     case "reset": {
-      const { droppedClaims, warnings, clearedProposal } = await reset(process.cwd(), section!, {}, { llm: claudeLlm() });
+      const { droppedClaims, warnings, clearedProposal } = await reset(process.cwd(), section!, {}, adapters());
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const { text, reason } of droppedClaims) console.log(`Dropped from ${section}: ${text} (${reason})`);
       if (clearedProposal) console.log(`Proposal deleted: ${clearedProposal}`);
