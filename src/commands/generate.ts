@@ -1,4 +1,5 @@
 import type { Adapters } from "../adapters.ts";
+import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR, isFrozen } from "../manifest.ts";
 import { emptyReport, sectionWriter, type WriteReport } from "../section-writer.ts";
 import { openTarget, readSection, sectionPath } from "../target.ts";
@@ -16,12 +17,13 @@ export type GenerateResult = WriteReport;
 export async function generate(
   repoDir: string,
   _options: GenerateOptions,
-  { llm }: Pick<Adapters, "llm">,
+  { llm, github }: Adapters,
 ): Promise<GenerateResult> {
   const target = await openTarget(repoDir);
   await gitIgnore(repoDir, CACHE_DIR);
   const result = emptyReport();
-  const writer = sectionWriter(repoDir, target, llm, result);
+  const discussions = github && (await gitHubEvidence(github, target.modules));
+  const writer = sectionWriter(repoDir, target, llm, result, discussions);
 
   for (const module of target.modules) {
     const section = target.sectionIds.get(module)!;
