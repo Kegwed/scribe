@@ -272,7 +272,7 @@ describe("update", () => {
 
     expect(llm.calls).toEqual([]);
     expect(repo.git("status", "--porcelain")).toBe("");
-    expect(result).toEqual({ droppedClaims: [], frozen: [], warnings: [], removed: [], proposals: [] });
+    expect(result).toEqual({ droppedClaims: [], frozen: [], warnings: [], removed: [], proposals: [], drift: [] });
   });
 
   it("asks for scribe init when the repo has no config", async () => {
