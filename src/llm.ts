@@ -24,11 +24,21 @@ export interface LlmRequest {
 export interface Llm {
   /** The response text, which conforms to the request's schema. */
   complete(request: LlmRequest): Promise<string>;
+  /** The most characters of prompt one request carries; a larger Module is reduced to fit. */
+  promptLimit: number;
 }
+
+/**
+ * A budget, not a measured boundary: about 100k tokens at the usual estimate of
+ * 4 characters a token, leaving the rest of the context window for the system
+ * text, a repair's extra text and the response.
+ */
+export const PROMPT_LIMIT = 400_000;
 
 export function claudeLlm(): Llm {
   const client = new Anthropic();
   return {
+    promptLimit: PROMPT_LIMIT,
     async complete({ model, system, prompt, schema }) {
       const message = await client.beta.messages
         .stream({
