@@ -177,7 +177,8 @@ describe("the GitHub Source", () => {
       const repo = createFixtureRepo(TARGET);
       const broken = fakeGitHub(PULLS);
       broken.pullRequest = async () => ({ number: 1 }) as never;
-      await expect(generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [] }), github: broken })).rejects.toThrow(/malformed/);
+      const { warnings } = await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [] }), github: broken });
+      expect(warnings).toEqual([expect.stringContaining("malformed")]);
 
       const github = fakeGitHub(PULLS);
       await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [] }), github });

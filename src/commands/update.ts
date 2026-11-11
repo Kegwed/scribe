@@ -27,7 +27,7 @@ export async function update(
   const target = await openTarget(repoDir);
   await gitIgnore(repoDir, CACHE_DIR);
   const result: UpdateResult = { ...emptyReport(), removed: [], proposals: [] };
-  const discussions = github && (await gitHubEvidence(repoDir, github, target.modules));
+  const discussions = github && (await gitHubEvidence(repoDir, github, target.modules, result.warnings));
   const writer = sectionWriter(repoDir, target, llm, result, discussions);
 
   const { sections } = target.manifest;

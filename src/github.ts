@@ -32,9 +32,24 @@ const RANK_HALF_LIFE_DAYS = 365;
 /**
  * GitHub Evidence for each Module, keyed by Module path: the discussion on the
  * merged pull requests that touched its files, and the issues they link to,
- * from the highest-ranked pull requests only.
+ * from the highest-ranked pull requests only. If GitHub fails, there is none,
+ * and `warnings` says why, so Scribe carries on with its other Sources.
  */
-export async function gitHubEvidence(repoDir: string, github: GitHub, modules: Module[]): Promise<Map<string, GitHubEvidence[]>> {
+export async function gitHubEvidence(
+  repoDir: string,
+  github: GitHub,
+  modules: Module[],
+  warnings: string[],
+): Promise<Map<string, GitHubEvidence[]>> {
+  try {
+    return await rankedEvidence(repoDir, github, modules);
+  } catch (error) {
+    warnings.push(`GitHub skipped, so no pull requests or issues are cited: ${error instanceof Error ? error.message : String(error)}`);
+    return new Map();
+  }
+}
+
+async function rankedEvidence(repoDir: string, github: GitHub, modules: Module[]): Promise<Map<string, GitHubEvidence[]>> {
   const cached = cachedGitHub(repoDir, github);
   const merged = (await cached.pullRequests()).filter((pr) => pr.mergedAt !== null);
   const rank = ranking(merged);
@@ -65,8 +80,7 @@ export async function gitHubEvidence(repoDir: string, github: GitHub, modules: M
  * Responses are cached only once validated, so a bad one is never replayed.
  */
 function cachedGitHub(repoDir: string, github: GitHub): GitHub {
-  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repoDir, encoding: "utf8" });
-  const sha = head.status === 0 ? head.stdout.trim() : undefined;
+  const sha = git(repoDir, "rev-parse", "HEAD");
   const updatedAt = new Map<number, string>();
 
   async function cached<T>(name: string | undefined, fetch: () => Promise<T>, valid: (value: unknown) => boolean): Promise<T> {
@@ -168,7 +182,114 @@ export interface PullRequest {
 
 /** The Target repo's pull requests and issues on GitHub. */
 export interface GitHub {
-  /** Its pull requests, merged and otherwise. */
+  /** Its pull requests; any not merged are ignored, so an adapter may leave them out. */
   pullRequests(): Promise<PullRequestSummary[]>;
   pullRequest(number: number): Promise<PullRequest>;
+}
+
+/** `owner/name` of the GitHub repo `origin` points at, or undefined if it isn't on GitHub. */
+export function gitHubRepo(repoDir: string): string | undefined {
+  const origin = git(repoDir, "remote", "get-url", "origin");
+  return origin?.match(/^(?:https:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+\/[^/]+?)(?:\.git)?\/?$/)?.[1];
+}
+
+/** The token `gh` is signed in with, or undefined if it isn't installed or signed in. */
+export function ghAuthToken(): string | undefined {
+  return run("gh", ["auth", "token"], ".");
+}
+
+/**
+ * The GitHub adapter for the Target repo: undefined unless `origin` points at
+ * GitHub and `token` gives one, in which case Scribe uses its other Sources only.
+ */
+export function connectGitHub(repoDir: string, token: () => string | undefined = ghAuthToken): GitHub | undefined {
+  const repo = gitHubRepo(repoDir);
+  if (!repo) return undefined;
+  const secret = token();
+  if (!secret) return undefined;
+  const [owner, name] = repo.split("/");
+  const query = (text: string, variables: Record<string, unknown>) =>
+    graphql(secret, text, { owner, name, ...variables }) as Promise<any>;
+
+  return {
+    async pullRequests() {
+      const pulls: PullRequestSummary[] = [];
+      let after: string | null = null;
+      do {
+        const { repository } = await query(LIST_QUERY, { after });
+        const page: any = repository.pullRequests;
+        for (const pr of page.nodes) {
+          pulls.push({
+            number: pr.number,
+            mergedAt: pr.mergedAt,
+            updatedAt: pr.updatedAt,
+            files: pr.files?.nodes.map((f: any) => f.path) ?? [],
+            reviewComments: pr.reviewThreads.nodes.reduce((sum: number, t: any) => sum + t.comments.totalCount, 0),
+          });
+        }
+        after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+      } while (after && pulls.length < MAX_PULL_REQUESTS_LISTED);
+      return pulls;
+    },
+    async pullRequest(number) {
+      const { repository: { pullRequest: pr } } = await query(PULL_QUERY, { number });
+      return {
+        number: pr.number,
+        title: pr.title,
+        body: pr.body,
+        url: pr.url,
+        comments: pr.reviewThreads.nodes.flatMap((t: any) =>
+          t.comments.nodes.map((c: any) => ({ id: c.databaseId, body: c.body, url: c.url }))),
+        linkedIssues: pr.closingIssuesReferences.nodes.map((i: any) => ({ number: i.number, title: i.title, body: i.body, url: i.url })),
+      };
+    },
+  };
+}
+
+/** The most recently updated merged pull requests are listed, up to this many. */
+const MAX_PULL_REQUESTS_LISTED = 1000;
+
+const LIST_QUERY = `query($owner: String!, $name: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(states: MERGED, first: 100, after: $after, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number mergedAt updatedAt
+        files(first: 100) { nodes { path } }
+        reviewThreads(first: 100) { nodes { comments { totalCount } } }
+      }
+    }
+  }
+}`;
+
+const PULL_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number title body url
+      reviewThreads(first: 100) { nodes { comments(first: 50) { nodes { databaseId body url } } } }
+      closingIssuesReferences(first: 10) { nodes { number title body url } }
+    }
+  }
+}`;
+
+async function graphql(token: string, query: string, variables: Record<string, unknown>): Promise<unknown> {
+  const response = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: { authorization: `bearer ${token}`, "content-type": "application/json", "user-agent": "scribe" },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!response.ok) throw new Error(`GitHub answered ${response.status} ${response.statusText}`);
+  const { data, errors } = (await response.json()) as { data?: unknown; errors?: { message: string }[] };
+  if (errors?.length) throw new Error(`GitHub: ${errors.map((e) => e.message).join("; ")}`);
+  return data;
+}
+
+/** The command's trimmed output, or undefined if it failed. */
+function run(command: string, args: string[], cwd: string): string | undefined {
+  const { status, stdout } = spawnSync(command, args, { cwd, encoding: "utf8" });
+  return status === 0 ? stdout.trim() || undefined : undefined;
+}
+
+function git(repoDir: string, ...args: string[]): string | undefined {
+  return run("git", args, repoDir);
 }

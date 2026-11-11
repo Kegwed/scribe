@@ -1,12 +1,20 @@
 #!/usr/bin/env node
+import type { Adapters } from "./adapters.ts";
 import { generate } from "./commands/generate.ts";
 import { init } from "./commands/init.ts";
 import { status } from "./commands/status.ts";
 import { update } from "./commands/update.ts";
 import { CONFIG_FILE } from "./config.ts";
+import { connectGitHub } from "./github.ts";
 import { claudeLlm } from "./llm.ts";
 
 const USAGE = "Usage: scribe <command>\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules and pending Proposals; exits 1 unless only Frozen Sections need attention";
+
+/** Claude, and GitHub when `origin` is on it and `gh` is signed in. */
+function adapters(): Adapters {
+  const github = connectGitHub(process.cwd());
+  return { llm: claudeLlm(), ...(github ? { github } : {}) };
+}
 
 async function main(argv: string[]): Promise<number> {
   const [command] = argv;
@@ -25,7 +33,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "generate": {
-      const { droppedClaims, frozen, warnings } = await generate(process.cwd(), {}, { llm: claudeLlm() });
+      const { droppedClaims, frozen, warnings } = await generate(process.cwd(), {}, adapters());
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
       for (const { section, text, reason } of droppedClaims) console.log(`Dropped from ${section}: ${text} (${reason})`);
@@ -33,7 +41,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "update": {
-      const { droppedClaims, frozen, proposals, removed, warnings } = await update(process.cwd(), {}, { llm: claudeLlm() });
+      const { droppedClaims, frozen, proposals, removed, warnings } = await update(process.cwd(), {}, adapters());
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
       for (const { section, file } of proposals) console.log(`Frozen and Stale, Proposal written: ${section}; merge ${file} into it by hand, then delete it.`);

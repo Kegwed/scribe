@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { CodeSymbol } from "./analyser.ts";
-import type { GitHubEvidence } from "./github.ts";
+import { type GitHubEvidence, gitHubRepo } from "./github.ts";
 import { contentHash } from "./hash.ts";
 import { completeCached, type Llm, MODELS } from "./llm.ts";
 import { saveManifest } from "./manifest.ts";
@@ -148,8 +148,7 @@ export function sectionWriter(
 type Permalinks = (symbol: CodeSymbol) => string;
 
 function githubPermalinks(repoDir: string): Permalinks | undefined {
-  const origin = git(repoDir, "remote", "get-url", "origin");
-  const repo = origin?.match(/^(?:https:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+\/[^/]+?)(?:\.git)?\/?$/)?.[1];
+  const repo = gitHubRepo(repoDir);
   const sha = git(repoDir, "rev-parse", "HEAD");
   if (!repo || !sha) return undefined;
   return ({ file, startLine, endLine }) => {
