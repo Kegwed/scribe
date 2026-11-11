@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MODELS } from "../llm.ts";
+import type { CostEstimate } from "../section-writer.ts";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { type RecordedLlm, recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { generate } from "./generate.ts";
@@ -81,6 +82,68 @@ describe("update against recorded responses", () => {
     for (const paragraph of prose) expect(paragraph).toMatch(/\[\^\d+\]$/);
     expect(read(repo.dir, GREETING_SECTION)).toBe(greeting);
     expect((await status(repo.dir)).sections.filter((s) => s.stale)).toEqual([]);
+  });
+});
+
+describe("update's cost estimate", () => {
+  const A_CHANGED = "export function a() {\n  return 2;\n}\n\nexport const k = 3;\n";
+
+  it("covers only the Stale Section; declining calls no LLM and changes no files", async () => {
+    const repo = await generated();
+    repo.commit({ "src/a/a.ts": A_CHANGED });
+    const llm = scriptedLlm({ paragraphs: [] });
+    const asked: CostEstimate[] = [];
+
+    const result = await update(repo.dir, { confirm: async (estimate) => (asked.push(estimate), false) }, { llm });
+
+    expect(asked.map((e) => e.sections.map((s) => s.section))).toEqual([["modules/src-a"]]);
+    expect(asked[0]!.dollars).toBeGreaterThan(0);
+    expect(result.declined).toBe(true);
+    expect(llm.calls).toEqual([]);
+    expect(repo.git("status", "--porcelain", "--untracked-files=all")).toBe("");
+  });
+
+  it("counts a Proposal for a Frozen, Stale Section, and declining writes none", async () => {
+    const repo = await generated();
+    repo.commit({ [A]: "# A\n\nMy words.\n", "src/a/a.ts": A_CHANGED });
+    const asked: CostEstimate[] = [];
+
+    await update(repo.dir, { confirm: async (estimate) => (asked.push(estimate), false) }, { llm: scriptedLlm({ paragraphs: [] }) });
+
+    expect(asked.map((e) => e.sections.map((s) => s.section))).toEqual([["modules/src-a"]]);
+    expect(existsSync(join(repo.dir, A_PROPOSAL))).toBe(false);
+  });
+
+  it("keeps a removed Module's record when declined", async () => {
+    const repo = await generated();
+    repo.git("rm", "--quiet", "-r", "src/b");
+    repo.commit({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
+      "src/a/a.ts": A_CHANGED,
+    });
+
+    const result = await update(repo.dir, { confirm: async () => false }, { llm: scriptedLlm({ paragraphs: [] }) });
+
+    expect(result.declined).toBe(true);
+    expect(result.removed).toEqual([]);
+    expect(repo.git("status", "--porcelain", "--untracked-files=all")).toBe("");
+  });
+
+  it("estimates Stale Sections whose rewrite is already cached at zero, without asking", async () => {
+    const repo = await generated();
+    repo.commit({ "src/a/a.ts": A_CHANGED });
+    const llm = scriptedLlm({ paragraphs: [{ claims: [{ text: "A returns two.", evidence: ["src/a/a.ts#a"] }] }] });
+    await update(repo.dir, {}, { llm });
+    repo.git("checkout", "--", ".");
+    let asked = false;
+
+    const result = await update(repo.dir, { confirm: async () => (asked = true) }, { llm });
+
+    expect(asked).toBe(false);
+    expect(result.estimate).toEqual({
+      sections: [{ section: "modules/src-a", tokens: 0, dollars: 0, unpriced: [] }], tokens: 0, dollars: 0, unpriced: [],
+    });
+    expect(read(repo.dir, A)).toBe("# A\n\nA returns two.[^1]\n\n[^1]: src/a/a.ts (a)\n");
   });
 });
 
@@ -272,7 +335,10 @@ describe("update", () => {
 
     expect(llm.calls).toEqual([]);
     expect(repo.git("status", "--porcelain")).toBe("");
-    expect(result).toEqual({ droppedClaims: [], frozen: [], warnings: [], removed: [], proposals: [], drift: [] });
+    expect(result).toEqual({
+      droppedClaims: [], frozen: [], warnings: [], removed: [], proposals: [],
+      estimate: { sections: [], tokens: 0, dollars: 0, unpriced: [] }, declined: false, drift: [],
+    });
   });
 
   it("asks for scribe init when the repo has no config", async () => {

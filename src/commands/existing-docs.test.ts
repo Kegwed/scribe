@@ -156,6 +156,20 @@ describe("existing docs as a Source", () => {
       expect((await status(repo.dir)).drift).toEqual([{ section: "modules/src-auth", ...DRIFT }]);
     });
 
+    it("estimates more for a Module docs are about, and nothing once its writes and Drift search are cached", async () => {
+      const repo = createFixtureRepo(CONTRADICTING);
+      const quiet = createFixtureRepo({ ...CONTRADICTING, "README.md": README.replace("`createSession(user)`", "`startSession(user)`") });
+      const asked = async (dir: string) => {
+        let tokens = -1;
+        await generate(dir, { confirm: async (estimate) => ((tokens = estimate.tokens), false) }, { llm: llm() });
+        return tokens;
+      };
+
+      expect(await asked(repo.dir)).toBeGreaterThan(await asked(quiet.dir));
+      await generate(repo.dir, {}, { llm: llm() });
+      expect((await generate(repo.dir, {}, { llm: llm() })).estimate.tokens).toBe(0);
+    });
+
     it("reports no Drift the verifier can't confirm against both sides", async () => {
       const repo = createFixtureRepo(CONTRADICTING);
 
