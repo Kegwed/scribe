@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type CodeSymbol, typescriptAnalyser } from "./analyser.ts";
 import { CONFIG_FILE, type Config, loadConfig } from "./config.ts";
@@ -73,6 +73,26 @@ export function changedEvidence(record: SectionRecord, evidence: { id: string; h
 export async function readSection(repoDir: string, path: string): Promise<string | undefined> {
   const file = join(repoDir, path);
   return existsSync(file) ? await readFile(file, "utf8") : undefined;
+}
+
+/** The Module whose Section is `section`; throws if no current Module has it. */
+/**
+ * Throws unless `section` is one of the Guide's Sections, such as one whose
+ * Module was removed; returns the Module whose Section it is, if any.
+ */
+export function guideSection(target: Target, section: string): Module | undefined {
+  if (!guideSections(target).includes(section)) {
+    throw new Error(`no Module has the Section ${section}; the Sections are ${guideSections(target).join(", ")}`);
+  }
+  return [...target.sectionIds].find(([, id]) => id === section)?.[0];
+}
+
+/** Deletes a Section's pending Proposal; returns its repo-relative path, or undefined if there was none. */
+export async function clearProposal(repoDir: string, config: Config, section: string): Promise<string | undefined> {
+  const path = proposalPath(config, section);
+  if (!existsSync(join(repoDir, path))) return undefined;
+  await rm(join(repoDir, path));
+  return path;
 }
 
 const MODULE_SECTIONS = "modules/";
