@@ -234,6 +234,23 @@ describe("adopt", () => {
     expect(manifest(repo.dir).sections["modules/src-a"].evidence.map((e: { id: string }) => e.id)).toEqual(["src/a/a.ts#k", "github:pr/12/comment/1201"]);
   });
 
+  it("offers the Claims only the Evidence that fits one request, and says what it left out", async () => {
+    const helper = `function helper() {\n${Array.from({ length: 60 }, (_, i) => `  // step${i}`).join("\n")}\n}\n`;
+    const repo = await generated({ ...TARGET, "src/a/helper.ts": helper });
+    repo.commit({ [A]: "# A\n\nA returns one.\n" });
+    const llm = scriptedLlm("unused", {}, { promptLimit: 600, attachments: { "A returns one.": ["src/a/a.ts#a"] } });
+
+    const result = await adopt(repo.dir, "modules/src-a", {}, { llm });
+
+    const [attach] = llm.calls.filter((call) => "attachments" in (call.schema.properties as object));
+    expect(attach!.prompt.length).toBeLessThanOrEqual(600);
+    expect(attach!.prompt).not.toContain("step59");
+    expect(result).toEqual({
+      unsupportedClaims: [],
+      warnings: ["The Evidence offered for modules/src-a's Claims left out src/a/helper.ts#helper to fit one request."],
+    });
+  });
+
   it("records every Claim Unsupported, asking no LLM, when the Module has no symbols", async () => {
     const repo = await generated();
     repo.commit({ "src/b/b.ts": "// Nothing here yet.\n", [B]: "# B\n\nB is one.\n" });

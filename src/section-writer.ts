@@ -326,14 +326,25 @@ export function sectionWriter(
     return symbols.filter((s) => s.module === module.path);
   }
 
-  /** The request that searches a Module's docs for Drift, or undefined if the Section isn't a Module's, no doc is about the Module or it has no code. */
-  function driftRequest(section: string): LlmRequest | undefined {
+  /**
+   * The request that searches a Module's docs for Drift, fitted to one request
+   * by leaving out its largest code first, with what it left out; undefined if
+   * the Section isn't a Module's, or no doc about the Module or none of its code fits.
+   */
+  function driftRequest(section: string): { request: LlmRequest; leftOut: string[] } | undefined {
     if (!modules.has(section)) return undefined;
     const module = moduleOf(section);
-    const code = moduleSymbols(module);
     const about = docsAbout(module, symbols, docs);
-    if (code.length === 0 || about.length === 0) return undefined;
-    return { model: models.summarise, system: DRIFT_SYSTEM, prompt: driftPrompt(module, code, about), schema: DRIFT_SCHEMA };
+    const { prompt, sent, leftOut } = wholeFit(
+      [...moduleSymbols(module), ...about],
+      renderModuleEvidence,
+      (rendered) => driftPrompt(module, rendered),
+      llm.promptLimit,
+      // Both sides are needed, and a doc passage is usually the smaller.
+      (e) => (isDoc(e) ? 2 : isCode(e) && e.exportedAs.length > 0 ? 1 : 0),
+    );
+    if (!sent.some(isCode) || !sent.some(isDoc)) return undefined;
+    return { request: { model: models.summarise, system: DRIFT_SYSTEM, prompt, schema: DRIFT_SCHEMA }, leftOut };
   }
 
   /**
@@ -342,8 +353,10 @@ export function sectionWriter(
    * cost nothing.
    */
   async function findDrift(section: string): Promise<DriftRecord[]> {
-    const request = driftRequest(section);
-    if (!request) return [];
+    const search = driftRequest(section);
+    if (!search) return [];
+    const { request, leftOut } = search;
+    if (leftOut.length > 0) report.warnings.push(`The Drift search for ${section} left out ${leftOut.join(", ")} to fit one request.`);
     const { drift: found } = await completeCached(llm, repoDir, request, parseDrift);
 
     const about = subject(section);
@@ -465,6 +478,24 @@ export function sectionWriter(
     return { content, citedEvidence, evidenceRecords, unsupportedClaims: [...unsupported] };
   }
 
+  /**
+   * The ids of the Evidence the verifier finds backs each of a human's Claims,
+   * offered as much of the Section's Evidence as fits one request, as a write
+   * would leave it out.
+   */
+  async function attach(section: string, about: Subject, claims: string[]): Promise<string[][]> {
+    const { prompt, leftOut } = wholeFit(
+      about.items,
+      about.render,
+      (rendered) => attachPrompt(about.frame(rendered), claims),
+      llm.promptLimit,
+      keepCodeRank,
+    );
+    if (leftOut.length > 0) report.warnings.push(`The Evidence offered for ${section}'s Claims left out ${leftOut.join(", ")} to fit one request.`);
+    const request = { model: models.verify, system: ATTACH_SYSTEM, prompt, schema: ATTACH_SCHEMA };
+    return completeCached(llm, repoDir, request, (response) => parseAttachments(response, claims.length));
+  }
+
   /** Writes `content` to `path` unless `previous` differs from it only in where its links pin; returns whether it wrote. */
   async function save(path: string, previous: string | undefined, section: string, content: string, citedEvidence: Evidence[], sameEvidence: boolean) {
     // Unchanged but for where its links pin: the old pins still point at this same text, so rewriting would only churn.
@@ -495,7 +526,7 @@ export function sectionWriter(
       if (uncachedSummaries.length === 0 && (!written || (!moduleSectionsChange && isCached(repoDir, request)))) {
         return { section, tokens: 0, dollars: 0, unpriced: [] };
       }
-      const drift = written ? driftRequest(section) : undefined;
+      const drift = written ? driftRequest(section)?.request : undefined;
       const costs = [
         ...uncachedSummaries.map((summary) => estimateCost(summary, SUMMARY_OUTPUT_TOKENS)),
         // Only a written Section is searched for Drift; a Proposal never is, so this overstates a Proposal's cost.
@@ -554,12 +585,7 @@ export function sectionWriter(
       const texts = sentences.filter((text) => text !== churnKept?.statement);
       const attached = texts.length === 0 || evidence.size === 0
         ? texts.map(() => [])
-        : await completeCached(llm, repoDir, {
-          model: models.verify,
-          system: ATTACH_SYSTEM,
-          prompt: attachPrompt(about.frame(about.items.map(about.render)), texts),
-          schema: ATTACH_SCHEMA,
-        }, (response) => parseAttachments(response, texts.length));
+        : await attach(section, about, texts);
       const claims: Claim[] = texts.map((text, i) => ({ text, evidence: attached[i]! }));
       const failures = await verifySection(llm, models.verify, repoDir, { paragraphs: [{ claims }] }, about);
 
@@ -990,26 +1016,60 @@ function finishFit({ evidence, render, build, limit, toSummarise, left: planned 
   const left = new Set(planned);
   const rendered = evidence.map((e, i) => (left.has(i) ? "" : render(e)));
   toSummarise.forEach((i, n) => (rendered[i] = renderSummarised(evidence[i] as CodeSymbol, summaries[n]!)));
-  const fits = () => build(rendered.filter((r) => r !== "")).length <= limit;
-
-  const keepRank = (i: number) => {
-    const item = evidence[i]!;
-    return !isCode(item) ? 0 : item.exportedAs.length > 0 ? 2 : 1;
-  };
-  const leaveOutOrder = evidence.map((_, i) => i)
-    .sort((a, b) => keepRank(a) - keepRank(b) || rendered[b]!.length - rendered[a]!.length);
-  for (const i of leaveOutOrder) {
-    if (fits()) break;
-    if (left.has(i)) continue;
-    left.add(i);
-    rendered[i] = "";
-  }
+  leaveOutToFit(evidence, rendered, left, build, limit, keepCodeRank);
 
   const summarised = new Set(toSummarise.filter((i) => !left.has(i)));
   return {
     prompt: build(rendered.filter((r) => r !== "")),
     sent: evidence.filter((_, i) => !left.has(i)),
     summarised: evidence.flatMap((e, i) => (summarised.has(i) ? [e.id] : [])),
+    leftOut: evidence.flatMap((e, i) => (left.has(i) ? [e.id] : [])),
+  };
+}
+
+/** A Section's Evidence is left out anything but code first, such as GitHub discussion, then internal symbols, then exported ones. */
+function keepCodeRank(e: Evidence): number {
+  return !isCode(e) ? 0 : e.exportedAs.length > 0 ? 2 : 1;
+}
+
+/**
+ * Leaves Evidence out of `rendered`, adding its index to `left`, until the
+ * prompt `build` makes fits within `limit`: the lowest `keepRank` first, the
+ * largest first within each.
+ */
+function leaveOutToFit(
+  evidence: Evidence[],
+  rendered: string[],
+  left: Set<number>,
+  build: (rendered: string[]) => string,
+  limit: number,
+  keepRank: (evidence: Evidence) => number,
+): void {
+  const fits = () => build(rendered.filter((r) => r !== "")).length <= limit;
+  const leaveOutOrder = evidence.map((_, i) => i)
+    .sort((a, b) => keepRank(evidence[a]!) - keepRank(evidence[b]!) || rendered[b]!.length - rendered[a]!.length);
+  for (const i of leaveOutOrder) {
+    if (fits()) break;
+    if (left.has(i)) continue;
+    left.add(i);
+    rendered[i] = "";
+  }
+}
+
+/** The prompt `build` makes from as much of `evidence`, sent whole, as fits within `limit`, leaving out by `keepRank`. */
+function wholeFit(
+  evidence: Evidence[],
+  render: (evidence: Evidence) => string,
+  build: (rendered: string[]) => string,
+  limit: number,
+  keepRank: (evidence: Evidence) => number,
+): { prompt: string; sent: Evidence[]; leftOut: string[] } {
+  const rendered = evidence.map(render);
+  const left = new Set<number>();
+  leaveOutToFit(evidence, rendered, left, build, limit, keepRank);
+  return {
+    prompt: build(rendered.filter((r) => r !== "")),
+    sent: evidence.filter((_, i) => !left.has(i)),
     leftOut: evidence.flatMap((e, i) => (left.has(i) ? [e.id] : [])),
   };
 }
@@ -1050,8 +1110,9 @@ const DRIFT_SCHEMA = {
 /** Assumed size of a Drift search's answer, for the cost estimate; not measured. */
 const DRIFT_OUTPUT_TOKENS = 500;
 
-function driftPrompt(module: Module, symbols: CodeSymbol[], docs: DocEvidence[]): string {
-  return [`Module: ${module.name} (${module.path})`, ...[...symbols, ...docs].map(renderModuleEvidence)].join("\n\n");
+/** `rendered` holds the Module's code symbols, then the doc passages about it. */
+function driftPrompt(module: Module, rendered: string[]): string {
+  return [`Module: ${module.name} (${module.path})`, ...rendered].join("\n\n");
 }
 
 interface FoundDrift {

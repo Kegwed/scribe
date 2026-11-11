@@ -627,6 +627,20 @@ describe("generate", () => {
       expect(result.droppedClaims).toContainEqual(expect.objectContaining({ text: "Run delegates to a helper." }));
     });
 
+    it("keeps its Drift search within the limit, leaving out code before the docs, and says what it left out", async () => {
+      const repo = createFixtureRepo({ ...LARGE, "README.md": "# A\n\nCall run with a value.\n" });
+      const llm = scriptedLlm(cites("Run delegates to a helper.", "src/a/a.ts#run"), {}, { promptLimit: LIMIT });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      const searches = llm.calls.filter((call) => "drift" in (call.schema.properties as object));
+      expect(searches).toHaveLength(1);
+      expect(searches[0]!.prompt.length).toBeLessThanOrEqual(LIMIT);
+      expect(searches[0]!.prompt).toContain('<doc id="README.md#a">');
+      expect(searches[0]!.prompt).toContain('<symbol id="src/a/a.ts#run"');
+      expect(result.warnings).toEqual(["The Drift search for modules/src-a left out src/a/a.ts#helper to fit one request."]);
+    });
+
     it("leaves out GitHub discussion before any code symbol", async () => {
       const repo = createFixtureRepo(LARGE);
       const github = fakeGitHub([{ number: 3, files: ["src/a/a.ts"], body: "Adds run and its helper. ".repeat(50) }]);
