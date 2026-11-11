@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import type { CodeSymbol } from "./analyser.ts";
 import { type DocEvidence, docsAbout } from "./docs.ts";
 import { GETTING_STARTED, unmatchedCommands } from "./getting-started.ts";
+import { CHURN_DAYS, type ChurnEvidence, isChurnEvidence } from "./git-history.ts";
 import { type GitHubEvidence, gitHubRepo } from "./github.ts";
 import { contentHash } from "./hash.ts";
 import { modelsOf } from "./config.ts";
@@ -140,6 +141,8 @@ interface Subject {
   uncited: string;
   /** Why a Claim fails before any model sees it, or undefined; deterministic. */
   check?(claim: Claim): string | undefined;
+  /** A Module's churn Evidence, from which Scribe writes the Section's last Claim itself. */
+  churn?: ChurnEvidence;
 }
 
 /**
@@ -153,7 +156,7 @@ export function sectionWriter(
   report: WriteReport,
   discussions: Map<string, GitHubEvidence[]> = new Map(),
 ): SectionWriter {
-  const { config, sectionIds, symbols, setup, docs, manifest } = target;
+  const { config, sectionIds, symbols, churn, setup, docs, manifest } = target;
   const permalinks = githubPermalinks(repoDir);
   const modules = new Map([...sectionIds].map(([module, section]) => [section, module]));
   const models = modelsOf(config);
@@ -197,6 +200,7 @@ export function sectionWriter(
       render: renderModuleEvidence,
       item: "symbol",
       uncited: "cites no Evidence from this Module",
+      churn: churn.get(module.path),
     };
   }
 
@@ -250,8 +254,15 @@ export function sectionWriter(
   function planFirstWrite(section: string, about: Subject, existing: string | undefined, changedEvidence: string[] | undefined): FitPlan {
     const record = manifest.sections[section];
     const present = new Set(about.evidence.keys());
+    // Scribe writes the churn Claim itself, so the model revises only the Claims it wrote, against their Evidence.
     const build = (rendered: string[]) => changedEvidence && existing !== undefined && record
-      ? revisionPrompt(about.frame(rendered), present, citingIds(existing, record.evidence.map((e) => e.id)), changedEvidence, about.item)
+      ? revisionPrompt(
+        about.frame(rendered),
+        present,
+        withoutChurn(citingIds(existing, record.evidence.map((e) => e.id))),
+        changedEvidence.filter((id) => !isChurnEvidence(id)),
+        about.item,
+      )
       : about.frame(rendered);
     return planFit(about.items, about.render, build, llm.promptLimit);
   }
@@ -307,8 +318,14 @@ export function sectionWriter(
 
     const citedEvidence = [...cited.values()];
     const footnotes = citedEvidence.map((item, i) => `[^${i + 1}]: ${citation(item, permalinks)}`);
+    const { churn: churnCited } = about;
+    if (churnCited) {
+      body.push(`${churnCited.statement}[^${footnotes.length + 1}]`);
+      footnotes.push(`[^${footnotes.length + 1}]: ${historyCitation(churnCited, permalinks)}`);
+    }
     const content = [`# ${about.title}`, ...body, ...(footnotes.length > 0 ? [footnotes.join("\n")] : [])].join("\n\n") + "\n";
-    return { content, citedEvidence };
+    const evidenceRecords = [...citedEvidence, ...(churnCited ? [churnCited] : [])].map(({ id, hash }) => ({ id, hash }));
+    return { content, citedEvidence, evidenceRecords };
   }
 
   /** Writes `content` to `path` unless `previous` differs from it only in where its links pin; returns whether it wrote. */
@@ -360,10 +377,9 @@ export function sectionWriter(
     },
 
     async write(section, existing, changedEvidence) {
-      const { content, citedEvidence } = await compose(section, existing, changedEvidence);
+      const { content, citedEvidence, evidenceRecords } = await compose(section, existing, changedEvidence);
       const drift = await findDrift(section);
       const path = sectionPath(config, section);
-      const evidenceRecords = citedEvidence.map(({ id, hash }) => ({ id, hash }));
       const previous = manifest.sections[section];
       const sameEvidence = JSON.stringify(previous?.evidence) === JSON.stringify(evidenceRecords);
       const sameDrift = JSON.stringify(previous?.drift ?? []) === JSON.stringify(drift);
@@ -390,7 +406,10 @@ export function sectionWriter(
     async adopt(section, content) {
       const about = subject(section);
       const { evidence } = about;
-      const texts = humanClaims(content);
+      // A human who kept Scribe's churn Claim as it is now keeps its Evidence: it is true by construction, so no model checks it.
+      const sentences = humanClaims(content);
+      const churnKept = about.churn !== undefined && sentences.includes(about.churn.statement) ? about.churn : undefined;
+      const texts = sentences.filter((text) => text !== churnKept?.statement);
       const attached = texts.length === 0 || evidence.size === 0
         ? texts.map(() => [])
         : await completeCached(llm, repoDir, {
@@ -412,7 +431,7 @@ export function sectionWriter(
       const drift = await findDrift(section);
       manifest.sections[section] = {
         file: sectionPath(config, section),
-        evidence: [...cited.values()].map(({ id, hash }) => ({ id, hash })),
+        evidence: [...cited.values(), ...(churnKept ? [churnKept] : [])].map(({ id, hash }) => ({ id, hash })),
         contentHash: contentHash(content),
         ...(unsupported.length > 0 ? { unsupportedClaims: unsupported } : {}),
         ...(drift.length > 0 ? { drift } : {}),
@@ -478,25 +497,52 @@ function parseAttachments(response: string, count: number): string[][] {
   return Array.from({ length: count }, (_, i) => byClaim.get(i)!);
 }
 
-/** Builds SHA-pinned URLs for Evidence in a file, or undefined unless `origin` points at GitHub. */
-type Permalinks = (evidence: FileEvidence) => string;
+/** Builds SHA-pinned URLs, or undefined unless `origin` points at GitHub. */
+interface Permalinks {
+  /** Evidence in a file, at its current line range. */
+  file(evidence: FileEvidence): string;
+  /** The commits that changed a repo-relative path, up to the pinned commit. */
+  history(path: string): string;
+}
 
 function githubPermalinks(repoDir: string): Permalinks | undefined {
   const repo = gitHubRepo(repoDir);
   const sha = git(repoDir, "rev-parse", "HEAD");
   if (!repo || !sha) return undefined;
-  return ({ file, startLine, endLine }) => {
-    const path = file.split("/").map(encodeURIComponent).join("/");
-    // GitHub renders markdown, and a rendered file has no line anchors unless shown plain.
-    const plain = /\.mdx?$/i.test(file) ? "?plain=1" : "";
-    return `https://github.com/${repo}/blob/${sha}/${path}${plain}#L${startLine}-L${endLine}`;
+  const encode = (path: string) => path.split("/").map(encodeURIComponent).join("/");
+  return {
+    file: ({ file, startLine, endLine }) => {
+      // GitHub renders markdown, and a rendered file has no line anchors unless shown plain.
+      const plain = /\.mdx?$/i.test(file) ? "?plain=1" : "";
+      return `https://github.com/${repo}/blob/${sha}/${encode(file)}${plain}#L${startLine}-L${endLine}`;
+    },
+    history: (path) => `https://github.com/${repo}/commits/${sha}${path === "." ? "" : `/${encode(path)}`}`,
   };
 }
 
 function citation(evidence: Evidence, permalinks: Permalinks | undefined): string {
   if (!inFile(evidence)) return `[${evidence.label}](${evidence.url})`;
   const label = `${evidence.file} (${evidence.name})`;
-  return permalinks ? `[${label}](${permalinks(evidence)})` : label;
+  return permalinks ? `[${label}](${permalinks.file(evidence)})` : label;
+}
+
+function historyCitation({ module }: ChurnEvidence, permalinks: Permalinks | undefined): string {
+  const label = `git history of ${module === "." ? "the repo" : module} (${CHURN_DAYS} days)`;
+  return permalinks ? `[${label}](${permalinks.history(module)})` : label;
+}
+
+/**
+ * A Section's text, as `citingIds` gives it, without the churn Claim Scribe
+ * wrote, which is last of its paragraphs and cited by its last footnote.
+ */
+function withoutChurn(content: string): string {
+  const blocks = content.replace(/\n$/, "").split("\n\n");
+  const footnotes = blocks.at(-1)?.startsWith("[^") ? blocks.pop()!.split("\n") : [];
+  const churn = footnotes.at(-1)?.match(/^\[\^(\d+)\]: (\S+)$/);
+  if (!churn || !isChurnEvidence(churn[2]!)) return content;
+  footnotes.pop();
+  const kept = blocks.filter((block) => !block.endsWith(`[^${churn[1]}]`));
+  return [...kept, ...(footnotes.length > 0 ? [footnotes.join("\n")] : [])].join("\n\n") + "\n";
 }
 
 function withoutPins(content: string): string {

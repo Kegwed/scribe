@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { fakeGitHub } from "../test/fake-github.ts";
 import { recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
+import { STABLE } from "../test/sections.ts";
 import { adopt } from "./adopt.ts";
 import { generate } from "./generate.ts";
 import { status } from "./status.ts";
@@ -101,8 +102,8 @@ describe("adopt", () => {
     expect(unsupportedClaims).toEqual([{ section: "modules/src-a", text: "A is fast." }]);
     expect(manifest(repo.dir).sections["modules/src-a"]).toEqual({
       file: A,
-      // The same symbols, unchanged, that generate cited for these two Claims.
-      evidence: generatedEvidence,
+      // The same symbols, unchanged, that generate cited for these two Claims; the human dropped the churn Claim.
+      evidence: generatedEvidence.filter((e: { id: string }) => !e.id.startsWith("history:")),
       contentHash: sha256(mine),
       unsupportedClaims: ["A is fast."],
     });
@@ -177,6 +178,22 @@ describe("adopt", () => {
     expect((await status(repo.dir)).sections.find((s) => s.section === "modules/src-a")).toEqual(
       expect.objectContaining({ frozen: false, stale: false }),
     );
+  });
+
+  it("keeps the churn Claim's git history Evidence when the human kept it as Scribe wrote it, asking no model about it", async () => {
+    const repo = await generated();
+    repo.commit({ [A]: `# A\n\nA returns one.\n\n${STABLE}[^1]\n\n[^1]: git history of src/a (90 days)\n` });
+    const llm = scriptedLlm("unused", {}, { attachments: { "A returns one.": ["src/a/a.ts#a"] } });
+
+    const result = await adopt(repo.dir, "modules/src-a", {}, { llm });
+
+    expect(result.unsupportedClaims).toEqual([]);
+    for (const call of llm.calls) expect(call.prompt).not.toContain(STABLE);
+    expect(manifest(repo.dir).sections["modules/src-a"].evidence).toEqual([
+      expect.objectContaining({ id: "src/a/a.ts#a" }),
+      { id: "history:src/a", hash: sha256(STABLE) },
+    ]);
+    expect((await status(repo.dir)).sections.find((s) => s.section === "modules/src-a")).toEqual(expect.objectContaining({ frozen: false, stale: false }));
   });
 
   it("records a review comment as Evidence for a human's Claim when GitHub is connected", async () => {
