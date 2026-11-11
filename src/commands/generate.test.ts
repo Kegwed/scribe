@@ -435,7 +435,7 @@ describe("generate", () => {
         stableSection("A", "src/a", "Run delegates to a helper.[^1][^2]", ["[^1]: src/a/a.ts (run)", "[^2]: src/a/a.ts (helper)"]),
       );
       const { evidence } = JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections["modules/src-a"];
-      expect(evidence.map((e: { id: string }) => e.id)).toEqual(["src/a/a.ts#run", "src/a/a.ts#helper"]);
+      expect(evidence.map((e: { id: string }) => e.id)).toEqual(["src/a/a.ts#run", "src/a/a.ts#helper", "history:src/a"]);
       expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: [] }]);
     });
 
