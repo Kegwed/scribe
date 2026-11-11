@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
+import { fakeGitHub } from "../test/fake-github.ts";
 import type { CostEstimate } from "../section-writer.ts";
 import { isSectionWrite, recordedLlm, type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { HOT, STABLE, stableSection } from "../test/sections.ts";
@@ -391,6 +392,164 @@ describe("generate", () => {
         for (const name of ["Ada", "Lovelace", "ada@example.com", "Fixture", "fixture@example.com"]) expect(section).not.toContain(name);
       }
       expect(read(repo.dir, "docs/guide/modules/src-auth.md")).toContain(HOT);
+    });
+  });
+
+  describe("a Module too large for one writing request", () => {
+    const BODY = Array.from({ length: 40 }, (_, i) => `  const step${i} = value + ${i};`).join("\n");
+    const LARGE: Files = {
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
+      "src/a/a.ts": [
+        "export function run(value: number) {",
+        "  return helper(value);",
+        "}",
+        "",
+        "function helper(value: number) {",
+        BODY,
+        "  return value;",
+        "}",
+        "",
+        `export const NAMES = [${Array.from({ length: 40 }, (_, i) => `"n${i}"`).join(", ")}];`,
+        "",
+      ].join("\n"),
+    };
+    const SECTION = "docs/guide/modules/src-a.md";
+    const LIMIT = 1500;
+    const cites = (text: string, ...evidence: string[]) => ({ paragraphs: [{ claims: [{ text, evidence }] }] });
+
+    it("writes its Section from summaries of its largest symbols, citing them as usual", async () => {
+      const repo = createFixtureRepo(LARGE);
+      const llm = scriptedLlm(cites("Run delegates to a helper.", "src/a/a.ts#run", "src/a/a.ts#helper"), {}, {
+        promptLimit: LIMIT,
+        summaries: { "src/a/a.ts#helper": "Adds a series of offsets and returns the value." },
+      });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      for (const { prompt } of writes(llm)) {
+        expect(prompt.length).toBeLessThanOrEqual(LIMIT);
+        expect(prompt).toContain("Adds a series of offsets and returns the value.");
+        expect(prompt).not.toContain("step39");
+      }
+      expect(read(repo.dir, SECTION)).toBe(
+        stableSection("A", "src/a", "Run delegates to a helper.[^1][^2]", ["[^1]: src/a/a.ts (run)", "[^2]: src/a/a.ts (helper)"]),
+      );
+      const { evidence } = JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections["modules/src-a"];
+      expect(evidence.map((e: { id: string }) => e.id)).toEqual(["src/a/a.ts#run", "src/a/a.ts#helper"]);
+      expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: [] }]);
+    });
+
+    it("against recorded responses, writes a cited Section from summaries and records its Evidence", async () => {
+      const repo = createFixtureRepo(LARGE);
+      const llm = recordedLlm("reduce", { promptLimit: LIMIT });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      const a = read(repo.dir, SECTION);
+      expect(a).toMatch(/^# A\n/);
+      expect(a).toMatch(/^\[\^\d+\]: src\/a\/a\.ts \(helper\)$/m);
+      const [, ...prose] = a.split("\n\n").filter((block) => !block.startsWith("[^"));
+      expect(prose.length).toBeGreaterThan(0);
+      for (const paragraph of prose) expect(paragraph).toMatch(/\[\^\d+\]$/);
+      const { evidence } = JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections["modules/src-a"];
+      expect(evidence.map((e: { id: string }) => e.id)).toContain("src/a/a.ts#helper");
+      expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: [] }]);
+    });
+
+    it("sends a Module that fits whole, with no summaries and nothing reported", async () => {
+      const repo = createFixtureRepo(LARGE);
+      const llm = scriptedLlm(cites("Run delegates to a helper.", "src/a/a.ts#run"), {}, { promptLimit: 10_000 });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      expect(writes(llm)[0]!.prompt).toContain("step39");
+      expect(writes(llm)[0]!.system).not.toContain("summarised");
+      expect(llm.calls).toHaveLength(2);
+      expect(result.reduced).toEqual([]);
+    });
+
+    it("leaves out symbols when summaries alone don't fit, internal ones first, and drops Claims citing them", async () => {
+      const repo = createFixtureRepo(LARGE);
+      const llm = scriptedLlm({
+        paragraphs: [{
+          claims: [
+            { text: "Run delegates to a helper.", evidence: ["src/a/a.ts#helper"] },
+            { text: "NAMES lists forty names.", evidence: ["src/a/a.ts#NAMES"] },
+          ],
+        }],
+      }, {}, { promptLimit: LIMIT, summaries: { "src/a/a.ts#helper": "Adds offsets. ".repeat(80) } });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      for (const { prompt } of writes(llm)) expect(prompt.length).toBeLessThanOrEqual(LIMIT);
+      expect(read(repo.dir, SECTION)).toBe(stableSection("A", "src/a", "NAMES lists forty names.[^1]", ["[^1]: src/a/a.ts (NAMES)"]));
+      expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: [], leftOut: ["src/a/a.ts#helper"] }]);
+      expect(result.droppedClaims).toContainEqual(expect.objectContaining({ text: "Run delegates to a helper." }));
+    });
+
+    it("leaves out GitHub discussion before any code symbol", async () => {
+      const repo = createFixtureRepo(LARGE);
+      const github = fakeGitHub([{ number: 3, files: ["src/a/a.ts"], body: "Adds run and its helper. ".repeat(50) }]);
+      const llm = scriptedLlm(cites("Run delegates to a helper.", "src/a/a.ts#run"), {}, { promptLimit: LIMIT });
+
+      const result = await generate(repo.dir, {}, { llm, github });
+
+      expect(writes(llm)[0]!.prompt).not.toContain("<discussion");
+      expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: ["github:pr/3"] }]);
+    });
+
+    it("leaves out a symbol too large even to summarise, without asking for a summary", async () => {
+      const repo = createFixtureRepo(LARGE);
+      const llm = scriptedLlm(cites("NAMES lists forty names.", "src/a/a.ts#NAMES"), {}, { promptLimit: 1000 });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      expect(llm.calls.filter((call) => call.prompt.includes("step39"))).toEqual([]);
+      expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: [], leftOut: ["src/a/a.ts#helper"] }]);
+      expect(read(repo.dir, SECTION)).toContain("NAMES lists forty names.[^1]");
+    });
+
+    it("makes no LLM calls, summaries included, when re-run with unchanged inputs, and still reports the reduction", async () => {
+      const repo = createFixtureRepo(LARGE);
+      await generate(repo.dir, {}, { llm: scriptedLlm(cites("Run delegates to a helper.", "src/a/a.ts#run"), {}, { promptLimit: LIMIT }) });
+
+      const llm = scriptedLlm("unused", {}, { promptLimit: LIMIT });
+      let asked = false;
+      const result = await generate(repo.dir, { confirm: async () => (asked = true) }, { llm });
+
+      expect(llm.calls).toEqual([]);
+      expect(asked).toBe(false);
+      expect(result.estimate.tokens).toBe(0);
+      expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: [] }]);
+    });
+
+    it("prices its summaries in the estimate, asking before any summary is made", async () => {
+      const repo = createFixtureRepo(LARGE);
+      const section = cites("Run delegates to a helper.", "src/a/a.ts#run");
+      // Fails at the write, after its summary is cached.
+      await expect(generate(repo.dir, {}, { llm: scriptedLlm("not json", {}, { promptLimit: LIMIT }) })).rejects.toThrow();
+      const summaryCached = await generate(repo.dir, { confirm: async () => false }, { llm: scriptedLlm(section, {}, { promptLimit: LIMIT }) });
+      const fresh = createFixtureRepo(LARGE);
+      const llm = scriptedLlm(section, {}, { promptLimit: LIMIT });
+
+      const result = await generate(fresh.dir, { confirm: async () => false }, { llm });
+
+      expect(llm.calls).toEqual([]);
+      expect(result.estimate.tokens).toBeGreaterThan(summaryCached.estimate.tokens);
+      expect(summaryCached.estimate.tokens).toBeGreaterThan(0);
+    });
+
+    it("never caches a summary it can't use", async () => {
+      const repo = createFixtureRepo(LARGE);
+      const section = cites("Run delegates to a helper.", "src/a/a.ts#run");
+      await expect(generate(repo.dir, {}, {
+        llm: scriptedLlm(section, {}, { promptLimit: LIMIT, summaries: { "src/a/a.ts#helper": 7 } }),
+      })).rejects.toThrow(/malformed summary/);
+
+      const llm = scriptedLlm(section, {}, { promptLimit: LIMIT });
+      await generate(repo.dir, {}, { llm });
+
+      expect(writes(llm)[0]!.prompt).toContain("Summary of src/a/a.ts#helper.");
     });
   });
 
