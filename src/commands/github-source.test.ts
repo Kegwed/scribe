@@ -6,6 +6,7 @@ import { MODELS } from "../llm.ts";
 import { type CannedPullRequest, fakeGitHub } from "../test/fake-github.ts";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { type RecordedLlm, recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
+import { stableSection } from "../test/sections.ts";
 import { generate } from "./generate.ts";
 import { status } from "./status.ts";
 import { update } from "./update.ts";
@@ -57,7 +58,7 @@ describe("the GitHub Source against recorded responses", () => {
     const section = read(repo.dir, "docs/guide/modules/src-retry.md");
     const footnotes = section.split("\n").filter((line) => line.startsWith("[^"));
     for (const note of footnotes) {
-      expect(note).toMatch(/^\[\^\d+\]: (?:src\/retry\/retry\.ts \(retry\)|\[(?:PR #12|PR #12, review comment|Issue #7)\]\(https:\/\/github\.com\/acme\/app\/(?:pull|issues)\/\S+\))$/);
+      expect(note).toMatch(/^\[\^\d+\]: (?:src\/retry\/retry\.ts \(retry\)|git history of src\/retry \(90 days\)|\[(?:PR #12|PR #12, review comment|Issue #7)\]\(https:\/\/github\.com\/acme\/app\/(?:pull|issues)\/\S+\))$/);
     }
     expect(footnotes.some((note) => note.includes("](https://github.com/"))).toBe(true);
     const [, ...prose] = section.split("\n\n").filter((block) => !block.startsWith("[^"));
@@ -77,15 +78,10 @@ describe("the GitHub Source", () => {
     await generate(repo.dir, {}, { llm, github });
 
     expect(writePrompts(llm)[0]).toContain("Keep a constant: callers cache it.");
-    expect(read(repo.dir, A)).toBe([
-      "# A",
-      "",
-      "A is a constant callers cache.[^1][^2]",
-      "",
+    expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "A is a constant callers cache.[^1][^2]", [
       "[^1]: src/a/a.ts (a)",
       "[^2]: [PR #12, review comment](https://github.com/acme/app/pull/12#discussion_r1201)",
-      "",
-    ].join("\n"));
+    ]));
   });
 
   it("offers a Module only the merged pull requests that touched its files, and the issues they link to", async () => {
