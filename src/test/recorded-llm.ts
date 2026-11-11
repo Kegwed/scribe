@@ -51,15 +51,17 @@ export function recordedLlm(name: string, { promptLimit = PROMPT_LIMIT }: { prom
  * last first, so code that depends on the order answers arrive in fails here.
  * A summary request answers with the summary in `summaries` keyed by the
  * summarised symbol's id, or with a one-line summary naming it. `promptLimit`
- * stands in for the writing model's, so small fixtures can exceed it.
+ * stands in for the writing model's, so small fixtures can exceed it. A search
+ * for Drift finds `drift`, by default nothing.
  */
 export function scriptedLlm(
   sections: unknown,
   verdicts: Record<string, unknown> = {},
-  { promptLimit = PROMPT_LIMIT, summaries = {}, attachments = {} }: {
+  { promptLimit = PROMPT_LIMIT, summaries = {}, attachments = {}, drift = [] }: {
     promptLimit?: number;
     summaries?: Record<string, unknown>;
     attachments?: Record<string, string[]>;
+    drift?: unknown[];
   } = {},
 ): RecordedLlm {
   const calls: LlmRequest[] = [];
@@ -88,6 +90,7 @@ export function scriptedLlm(
         const id = request.prompt.match(/<symbol id="([^"]*)"/)?.[1] ?? "";
         return asResponseText({ summary: id in summaries ? summaries[id] : `Summary of ${id}.` });
       }
+      if ("drift" in ((request.schema.properties ?? {}) as object)) return asResponseText({ drift });
       const claim = Object.keys(verdicts).find((key) => request.prompt.includes(key));
       return asResponseText(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);
     },

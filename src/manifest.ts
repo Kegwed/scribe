@@ -23,6 +23,30 @@ export interface SectionRecord {
   contentHash: string;
   /** Claims in an adopted Section for which the verifier found no Evidence; kept in the Section, never deleted. */
   unsupportedClaims?: string[];
+  /** Where existing docs contradicted the code when Scribe last wrote the Section; absent if nowhere. */
+  drift?: DriftRecord[];
+}
+
+/** A contradiction between existing docs and the code, with the Evidence on each side; the code is treated as correct. */
+export interface DriftRecord {
+  description: string;
+  docs: EvidenceRecord[];
+  code: EvidenceRecord[];
+}
+
+/** A Drift as reported: the Section it was found for, and the ids of the Evidence on each side. */
+export interface DriftReport {
+  section: string;
+  description: string;
+  docs: string[];
+  code: string[];
+}
+
+/** Every Drift the manifest records, Section by Section. */
+export function recordedDrift({ sections }: Manifest): DriftReport[] {
+  return Object.entries(sections).flatMap(([section, { drift = [] }]) => drift.map(({ description, docs, code }) => ({
+    section, description, docs: docs.map((e) => e.id), code: code.map((e) => e.id),
+  })));
 }
 
 export interface Manifest {

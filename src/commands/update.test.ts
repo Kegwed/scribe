@@ -360,7 +360,7 @@ describe("update", () => {
     expect(repo.git("status", "--porcelain")).toBe("");
     expect(result).toEqual({
       droppedClaims: [], frozen: [], reduced: [], warnings: [], removed: [], proposals: [],
-      estimate: { sections: [], tokens: 0, dollars: 0, unpriced: [] }, declined: false,
+      estimate: { sections: [], tokens: 0, dollars: 0, unpriced: [] }, declined: false, drift: [],
     });
   });
 
