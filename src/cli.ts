@@ -12,13 +12,14 @@ const USAGE = "Usage: scribe <command> [--yes]\n\nCommands:\n  init      Detect 
 
 /** Prints a run's estimate, then asks to go ahead unless `yes`; no answer, as when stdin closes, declines. */
 function confirmer(yes: boolean): Confirm {
-  return async ({ sections, tokens, dollars }) => {
+  return async ({ sections, tokens, dollars, unpriced }) => {
     const paid = sections.filter((s) => s.tokens > 0);
     const width = Math.max(0, ...paid.map((s) => s.section.length));
     console.log(`Estimated cost: ${usd(dollars)} for ${paid.length} Section${paid.length === 1 ? "" : "s"}, about ${tokens.toLocaleString("en-US")} tokens`);
     for (const s of paid) console.log(`  ${s.section.padEnd(width)}  ${usd(s.dollars)}`);
     const cached = sections.length - paid.length;
     if (cached > 0) console.log(`  plus ${cached} cached Section${cached === 1 ? "" : "s"} at no cost`);
+    if (unpriced.length > 0) console.log(`  not counting ${unpriced.join(", ")}, whose price Scribe doesn't know`);
     if (yes) return true;
     const answer = await ask("Continue? [y/N] ");
     return /^y(es)?$/i.test(answer?.trim() ?? "");

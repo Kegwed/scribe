@@ -5,31 +5,42 @@ import Anthropic from "@anthropic-ai/sdk";
 import { contentHash } from "./hash.ts";
 import { CACHE_DIR } from "./manifest.ts";
 
-/** Sonnet writes Sections; Haiku does bulk summarisation and verification (ADR-0003). */
-export const MODELS = {
+/** The model Scribe uses for each kind of request. */
+export interface Models {
+  write: string;
+  summarise: string;
+  verify: string;
+}
+
+/** Sonnet writes Sections; Haiku does bulk summarisation and verification (ADR-0003). Config can override each. */
+export const MODELS: Readonly<Models> = {
   write: "claude-sonnet-5-5",
   summarise: "claude-haiku-5-5",
   verify: "claude-haiku-5-5",
-} as const;
+};
 
 /** US dollars per million tokens, from Anthropic's published API prices. */
 const PRICES: Record<string, { input: number; output: number }> = {
+  "claude-opus-5-5": { input: 4, output: 20 },
   "claude-sonnet-5-5": { input: 2, output: 10 },
+  "claude-sonnet-5": { input: 2, output: 10 },
   "claude-haiku-5-5": { input: 0.1, output: 0.5 },
+  "claude-haiku-4-5": { input: 1, output: 5 },
 };
 
 /**
  * What a request is expected to cost before it is sent: its input tokens
  * approximated from its length, plus `outputTokens` the caller expects back.
  * Approximate by design, since counting exactly would itself call the API.
+ * `dollars` is undefined for a model whose price isn't known.
  */
-export function estimateCost(request: LlmRequest, outputTokens: number): { tokens: number; dollars: number } {
+export function estimateCost(request: LlmRequest, outputTokens: number): { model: string; tokens: number; dollars: number | undefined } {
   const price = PRICES[request.model];
-  if (!price) throw new Error(`no price known for ${request.model}`);
   const input = approximateTokens(request.system + request.prompt + JSON.stringify(request.schema));
   return {
+    model: request.model,
     tokens: input + outputTokens,
-    dollars: (input * price.input + outputTokens * price.output) / 1_000_000,
+    dollars: price && (input * price.input + outputTokens * price.output) / 1_000_000,
   };
 }
 

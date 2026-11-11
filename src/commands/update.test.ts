@@ -140,7 +140,9 @@ describe("update's cost estimate", () => {
     const result = await update(repo.dir, { confirm: async () => (asked = true) }, { llm });
 
     expect(asked).toBe(false);
-    expect(result.estimate).toEqual({ sections: [{ section: "modules/src-a", tokens: 0, dollars: 0 }], tokens: 0, dollars: 0 });
+    expect(result.estimate).toEqual({
+      sections: [{ section: "modules/src-a", tokens: 0, dollars: 0, unpriced: [] }], tokens: 0, dollars: 0, unpriced: [],
+    });
     expect(read(repo.dir, A)).toBe("# A\n\nA returns two.[^1]\n\n[^1]: src/a/a.ts (a)\n");
   });
 });
@@ -335,7 +337,7 @@ describe("update", () => {
     expect(repo.git("status", "--porcelain")).toBe("");
     expect(result).toEqual({
       droppedClaims: [], frozen: [], warnings: [], removed: [], proposals: [],
-      estimate: { sections: [], tokens: 0, dollars: 0 }, declined: false,
+      estimate: { sections: [], tokens: 0, dollars: 0, unpriced: [] }, declined: false,
     });
   });
 
