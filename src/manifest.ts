@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { contentHash } from "./hash.ts";
 
 /** Committed record of what Scribe last wrote, compared against to detect Stale and Frozen Sections (ADR-0002). */
 export const SCRIBE_DIR = ".scribe";
@@ -25,6 +26,11 @@ export interface SectionRecord {
 export interface Manifest {
   version: 1;
   sections: Record<string, SectionRecord>;
+}
+
+/** Whether a human has edited a Section's file, given its content (undefined if absent) and its record. */
+export function isFrozen(content: string | undefined, record: SectionRecord | undefined): boolean {
+  return content !== undefined && contentHash(content) !== record?.contentHash;
 }
 
 export function emptyManifest(): Manifest {

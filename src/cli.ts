@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { generate } from "./commands/generate.ts";
 import { init } from "./commands/init.ts";
+import { status } from "./commands/status.ts";
 import { CONFIG_FILE } from "./config.ts";
 import { claudeLlm } from "./llm.ts";
 
-const USAGE = "Usage: scribe <command>\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module";
+const USAGE = "Usage: scribe <command>\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module\n  status    Report Stale and Frozen Sections; exits 1 if any are Stale";
 
 async function main(argv: string[]): Promise<number> {
   const [command] = argv;
@@ -29,6 +30,16 @@ async function main(argv: string[]): Promise<number> {
       for (const { section, text, reason } of droppedClaims) console.log(`Dropped from ${section}: ${text} (${reason})`);
       console.log("Guide generated.");
       return 0;
+    }
+    case "status": {
+      const { sections } = await status(process.cwd());
+      const attention = sections.filter((s) => s.frozen || s.stale);
+      for (const { section, frozen, stale, changedEvidence } of attention) {
+        const label = frozen && stale ? "Frozen and Stale" : frozen ? "Frozen" : "Stale";
+        console.log(`${label}: ${section}${stale ? ` (changed: ${changedEvidence.join(", ")})` : ""}`);
+      }
+      if (attention.length === 0) console.log(`All ${sections.length} Section${sections.length === 1 ? "" : "s"} current.`);
+      return sections.some((s) => s.stale) ? 1 : 0;
     }
     default:
       console.error(USAGE);

@@ -7,7 +7,7 @@ import { type CodeSymbol, typescriptAnalyser } from "../analyser.ts";
 import { CONFIG_FILE, loadConfig } from "../config.ts";
 import { contentHash } from "../hash.ts";
 import { completeCached, type Llm, MODELS } from "../llm.ts";
-import { CACHE_DIR, loadManifest, saveManifest } from "../manifest.ts";
+import { CACHE_DIR, isFrozen, loadManifest, saveManifest } from "../manifest.ts";
 import { detectModules, type Module } from "../modules.ts";
 import { gitIgnore } from "./init.ts";
 
@@ -49,7 +49,7 @@ export async function generate(
     const file = join(repoDir, path);
     const existing = existsSync(file) ? await readFile(file, "utf8") : undefined;
     const record = manifest.sections[section];
-    if (existing !== undefined && contentHash(existing) !== record?.contentHash) {
+    if (isFrozen(existing, record)) {
       result.frozen.push(section);
       continue;
     }
