@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
+import type { CostEstimate } from "../section-writer.ts";
 import { isSectionWrite, recordedLlm, type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { generate } from "./generate.ts";
 
@@ -132,6 +133,60 @@ describe("generate", () => {
 
     expect(llm.calls).toEqual([]);
     expect(read(repo.dir, "docs/guide/modules/src-auth.md")).toBe(before);
+  });
+
+  describe("cost estimate", () => {
+    it("asks for confirmation with an estimate per Section; declining calls no LLM and changes no files", async () => {
+      const repo = createFixtureRepo(TARGET);
+      const llm = scriptedLlm({ paragraphs: [] });
+      const asked: CostEstimate[] = [];
+
+      const result = await generate(repo.dir, { confirm: async (estimate) => (asked.push(estimate), false) }, { llm });
+
+      expect(asked).toHaveLength(1);
+      const [estimate] = asked;
+      expect(estimate!.sections.map((s) => s.section)).toEqual(["modules/src-auth", "modules/src-billing"]);
+      for (const section of estimate!.sections) {
+        expect(section.tokens).toBeGreaterThan(0);
+        expect(section.dollars).toBeGreaterThan(0);
+      }
+      expect(estimate!.dollars).toBeCloseTo(estimate!.sections[0]!.dollars + estimate!.sections[1]!.dollars);
+      expect(result.declined).toBe(true);
+      expect(llm.calls).toEqual([]);
+      expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
+    });
+
+    it("writes the Guide once confirmed", async () => {
+      const repo = createFixtureRepo(TARGET);
+
+      const result = await generate(repo.dir, { confirm: async () => true }, { llm: recordedLlm("generate") });
+
+      expect(result.declined).toBe(false);
+      expect(existsSync(join(repo.dir, "docs/guide/modules/src-auth.md"))).toBe(true);
+    });
+
+    it("names a configured model it has no price for, pricing only the others", async () => {
+      const repo = createFixtureRepo({ ...TARGET, "scribe.config.json": JSON.stringify({ models: { write: "claude-unlisted" } }) });
+      const asked: CostEstimate[] = [];
+
+      await generate(repo.dir, { confirm: async (estimate) => (asked.push(estimate), false) }, { llm: scriptedLlm({ paragraphs: [] }) });
+
+      expect(asked[0]!.unpriced).toEqual(["claude-unlisted"]);
+      expect(asked[0]!.tokens).toBeGreaterThan(0);
+      expect(asked[0]!.dollars).toBeGreaterThan(0);
+    });
+
+    it("estimates a fully cached run at zero, without asking", async () => {
+      const repo = createFixtureRepo(TARGET);
+      await generate(repo.dir, {}, { llm: recordedLlm("generate") });
+      let asked = false;
+
+      const result = await generate(repo.dir, { confirm: async () => (asked = true) }, { llm: recordedLlm("generate") });
+
+      expect(asked).toBe(false);
+      expect(result.estimate.tokens).toBe(0);
+      expect(result.estimate.dollars).toBe(0);
+    });
   });
 
   it("never caches a response it can't use", async () => {
