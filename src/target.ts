@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type CodeSymbol, typescriptAnalyser } from "./analyser.ts";
 import { CONFIG_FILE, type Config, loadConfig } from "./config.ts";
+import { type ChurnEvidence, churnEvidence } from "./git-history.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
 import { detectModules, type Module } from "./modules.ts";
 
@@ -13,6 +14,8 @@ export interface Target {
   /** Each Module's Section id, which is also its file's path in the Guide, without the extension. */
   sectionIds: Map<Module, string>;
   symbols: CodeSymbol[];
+  /** Each Module's churn Evidence, keyed by Module path; empty without git history. */
+  churn: Map<string, ChurnEvidence>;
   manifest: Manifest;
 }
 
@@ -23,8 +26,9 @@ export async function openTarget(repoDir: string): Promise<Target> {
   const modules = config.modules ?? (await detectModules(repoDir));
   const sectionIds = uniqueSectionIds(modules);
   const { symbols } = await typescriptAnalyser.analyse(repoDir, modules);
+  const churn = churnEvidence(repoDir, modules);
   const manifest = await loadManifest(repoDir);
-  return { config, modules, sectionIds, symbols, manifest };
+  return { config, modules, sectionIds, symbols, churn, manifest };
 }
 
 /** Repo-relative path of a Section's file. */
@@ -39,9 +43,9 @@ export function proposalPath(config: Config, section: string): string {
 
 export const PROPOSAL_SUFFIX = ".proposal.md";
 
-/** Ids of the symbols a Section cites whose text has changed or which no longer exist; the Section is Stale if any. */
-export function changedEvidence(record: SectionRecord, symbols: CodeSymbol[]): string[] {
-  const hashes = new Map(symbols.map((s) => [s.id, s.hash]));
+/** Ids of the Evidence a Section cites that has changed or no longer exists; the Section is Stale if any. */
+export function changedEvidence(record: SectionRecord, { symbols, churn }: Pick<Target, "symbols" | "churn">): string[] {
+  const hashes = new Map([...symbols, ...churn.values()].map((e) => [e.id, e.hash]));
   return record.evidence.filter(({ id, hash }) => hashes.get(id) !== hash).map(({ id }) => id);
 }
 

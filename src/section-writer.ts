@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { CodeSymbol } from "./analyser.ts";
+import { CHURN_DAYS, type ChurnEvidence, isChurnEvidence } from "./git-history.ts";
 import { contentHash } from "./hash.ts";
 import { completeCached, type Llm, MODELS } from "./llm.ts";
 import { saveManifest } from "./manifest.ts";
@@ -38,7 +39,7 @@ export interface SectionWriter {
 }
 
 export function sectionWriter(repoDir: string, target: Target, llm: Llm, report: WriteReport): SectionWriter {
-  const { config, sectionIds, symbols, manifest } = target;
+  const { config, sectionIds, symbols, churn, manifest } = target;
   const permalinks = githubPermalinks(repoDir);
 
   /** A Module's Section, verified, with the symbols it cites; revised from `existing` given `changedEvidence`. */
@@ -49,8 +50,14 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
     const evidence = new Map(symbols.filter((s) => s.module === module.path).map((s) => [s.id, s]));
     const writeSection = (prompt: string) =>
       completeCached(llm, repoDir, { model: MODELS.write, system: SECTION_SYSTEM, prompt, schema: SECTION_SCHEMA }, parseSection);
+    // Scribe writes the churn Claim itself, so the model revises only the Claims it wrote, against the symbols.
     const firstPrompt = changedEvidence && existing !== undefined && record
-      ? revisionPrompt(module, [...evidence.values()], citingIds(existing, record.evidence.map((e) => e.id)), changedEvidence)
+      ? revisionPrompt(
+        module,
+        [...evidence.values()],
+        withoutChurn(citingIds(existing, record.evidence.map((e) => e.id))),
+        changedEvidence.filter((id) => !isChurnEvidence(id)),
+      )
       : sectionPrompt(module, [...evidence.values()]);
     let written: SectionResponse = evidence.size === 0 ? { paragraphs: [] } : await writeSection(firstPrompt);
     let failures = await verifySection(llm, repoDir, written, evidence);
@@ -81,8 +88,14 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
 
     const citedSymbols = [...cited.values()];
     const footnotes = citedSymbols.map((symbol, i) => `[^${i + 1}]: ${citation(symbol, permalinks)}`);
+    const churnCited = churn.get(module.path);
+    if (churnCited) {
+      body.push(`${churnCited.statement}[^${footnotes.length + 1}]`);
+      footnotes.push(`[^${footnotes.length + 1}]: ${historyCitation(churnCited, permalinks)}`);
+    }
     const content = [`# ${module.name}`, ...body, ...(footnotes.length > 0 ? [footnotes.join("\n")] : [])].join("\n\n") + "\n";
-    return { section, content, citedSymbols };
+    const evidenceRecords = [...citedSymbols, ...(churnCited ? [churnCited] : [])].map(({ id, hash }) => ({ id, hash }));
+    return { section, content, citedSymbols, evidenceRecords };
   }
 
   /** Writes `content` to `path` unless `previous` differs from it only in where its links pin; returns whether it wrote. */
@@ -98,9 +111,8 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
 
   return {
     async write(module, existing, changedEvidence) {
-      const { section, content, citedSymbols } = await compose(module, existing, changedEvidence);
+      const { section, content, citedSymbols, evidenceRecords } = await compose(module, existing, changedEvidence);
       const path = sectionPath(config, section);
-      const evidenceRecords = citedSymbols.map(({ id, hash }) => ({ id, hash }));
       const sameEvidence = JSON.stringify(manifest.sections[section]?.evidence) === JSON.stringify(evidenceRecords);
       if (!(await save(path, existing, section, content, citedSymbols, sameEvidence))) return;
       manifest.sections[section] = {
@@ -121,23 +133,47 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
   };
 }
 
-/** Builds SHA-pinned URLs for a symbol, or undefined unless `origin` points at GitHub. */
-type Permalinks = (symbol: CodeSymbol) => string;
+/** Builds SHA-pinned URLs, or undefined unless `origin` points at GitHub. */
+interface Permalinks {
+  symbol(symbol: CodeSymbol): string;
+  /** The commits that changed a repo-relative path, up to the pinned commit. */
+  history(path: string): string;
+}
 
 function githubPermalinks(repoDir: string): Permalinks | undefined {
   const origin = git(repoDir, "remote", "get-url", "origin");
   const repo = origin?.match(/^(?:https:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+\/[^/]+?)(?:\.git)?\/?$/)?.[1];
   const sha = git(repoDir, "rev-parse", "HEAD");
   if (!repo || !sha) return undefined;
-  return ({ file, startLine, endLine }) => {
-    const path = file.split("/").map(encodeURIComponent).join("/");
-    return `https://github.com/${repo}/blob/${sha}/${path}#L${startLine}-L${endLine}`;
+  const encode = (path: string) => path.split("/").map(encodeURIComponent).join("/");
+  return {
+    symbol: ({ file, startLine, endLine }) => `https://github.com/${repo}/blob/${sha}/${encode(file)}#L${startLine}-L${endLine}`,
+    history: (path) => `https://github.com/${repo}/commits/${sha}${path === "." ? "" : `/${encode(path)}`}`,
   };
 }
 
 function citation(symbol: CodeSymbol, permalinks: Permalinks | undefined): string {
   const label = `${symbol.file} (${symbol.name})`;
-  return permalinks ? `[${label}](${permalinks(symbol)})` : label;
+  return permalinks ? `[${label}](${permalinks.symbol(symbol)})` : label;
+}
+
+function historyCitation({ module }: ChurnEvidence, permalinks: Permalinks | undefined): string {
+  const label = `git history of ${module === "." ? "the repo" : module} (${CHURN_DAYS} days)`;
+  return permalinks ? `[${label}](${permalinks.history(module)})` : label;
+}
+
+/**
+ * A Section's text, as `citingIds` gives it, without the churn Claim Scribe
+ * wrote, which is last of its paragraphs and cited by its last footnote.
+ */
+function withoutChurn(content: string): string {
+  const blocks = content.replace(/\n$/, "").split("\n\n");
+  const footnotes = blocks.at(-1)?.startsWith("[^") ? blocks.pop()!.split("\n") : [];
+  const churn = footnotes.at(-1)?.match(/^\[\^(\d+)\]: (\S+)$/);
+  if (!churn || !isChurnEvidence(churn[2]!)) return content;
+  footnotes.pop();
+  const kept = blocks.filter((block) => !block.endsWith(`[^${churn[1]}]`));
+  return [...kept, ...(footnotes.length > 0 ? [footnotes.join("\n")] : [])].join("\n\n") + "\n";
 }
 
 function withoutPins(content: string): string {

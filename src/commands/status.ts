@@ -40,7 +40,7 @@ export async function status(repoDir: string): Promise<StatusResult> {
 
   const recorded = await Promise.all(Object.entries(manifest.sections).map(async ([section, record]) => {
     const content = await readSection(repoDir, record.file);
-    const changed = changedEvidence(record, symbols);
+    const changed = changedEvidence(record, target);
     return {
       section,
       file: record.file,

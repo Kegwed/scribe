@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { MODELS } from "../llm.ts";
 import { recordedLlm, type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
+import { HOT, STABLE, stableSection } from "../test/sections.ts";
 import { generate } from "./generate.ts";
 
 const TARGET: Files = {
@@ -54,7 +55,7 @@ describe("generate", () => {
 
     await generate(repo.dir, {}, { llm });
 
-    expect(read(repo.dir, "docs/guide/modules/src-a.md")).toBe("# src/a\n\nOne.[^1] Two.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+    expect(read(repo.dir, "docs/guide/modules/src-a.md")).toBe(stableSection("src/a", "src/a", "One.[^1] Two.[^1]", ["[^1]: src/a/a.ts (a)"]));
   });
 
   it("writes the Guide to the configured directory", async () => {
@@ -118,6 +119,9 @@ describe("generate", () => {
       evidence: [{
         id: "src/billing/invoice.ts#sendInvoice",
         hash: sha256("export function sendInvoice(amount: number) {\n  return amount > 0;\n}"),
+      }, {
+        id: "history:src/billing",
+        hash: sha256(STABLE),
       }],
       contentHash: sha256(read(repo.dir, "docs/guide/modules/src-billing.md")),
     });
@@ -191,7 +195,7 @@ describe("generate", () => {
     const result = await generate(repo.dir, {}, { llm });
 
     const a = read(repo.dir, "docs/guide/modules/src-a.md");
-    expect(a).toBe("# src/a\n\nBacked.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+    expect(a).toBe(stableSection("src/a", "src/a", "Backed.[^1]", ["[^1]: src/a/a.ts (a)"]));
     expect(result.droppedClaims).toContainEqual({ section: "modules/src-a", text: "Uncited.", reason: expect.any(String) });
     expect(result.droppedClaims).toContainEqual({ section: "modules/src-a", text: "Invented.", reason: expect.any(String) });
   });
@@ -230,7 +234,7 @@ describe("generate", () => {
     expect(result.frozen).toEqual([]);
   });
 
-  it("writes a bare Section for a Module with no symbols, without asking the LLM", async () => {
+  it("writes only the churn Claim for a Module with no symbols, without asking the LLM", async () => {
     const repo = createFixtureRepo({
       "scribe.config.json": JSON.stringify({ modules: [{ name: "Empty", path: "src/empty" }] }),
     });
@@ -238,7 +242,7 @@ describe("generate", () => {
 
     await generate(repo.dir, {}, { llm });
 
-    expect(read(repo.dir, "docs/guide/modules/src-empty.md")).toBe("# Empty\n");
+    expect(read(repo.dir, "docs/guide/modules/src-empty.md")).toBe(stableSection("Empty", "src/empty", ""));
     expect(llm.calls).toEqual([]);
   });
 
@@ -258,6 +262,82 @@ describe("generate", () => {
     await expect(generate(repo.dir, {}, { llm: recordedLlm("generate") })).rejects.toThrow(/scribe init/);
   });
 
+  describe("churn", () => {
+    const TWO_MODULES: Files = { "scribe.config.json": "{}", "src/a/a.ts": "export const a = 1;\n", "src/b/b.ts": "export const b = 1;\n" };
+    const claimOn = (id: string) => ({ paragraphs: [{ claims: [{ text: "One.", evidence: [id] }] }] });
+    /** Commits `count` changes to a file of Module src/a that holds no symbols. */
+    const churnA = (repo: ReturnType<typeof createFixtureRepo>, count: number, date?: string) => {
+      for (let i = 0; i < count; i++) repo.commit({ "src/a/notes.md": `change ${i}\n` }, `change ${i}`, date);
+    };
+
+    it("describes a Module with many recent commits as hot, citing its git history", async () => {
+      const repo = createFixtureRepo(TWO_MODULES);
+      churnA(repo, 4);
+
+      await generate(repo.dir, {}, { llm: scriptedLlm([claimOn("src/a/a.ts#a"), claimOn("src/b/b.ts#b")]) });
+
+      expect(read(repo.dir, "docs/guide/modules/src-a.md")).toBe(
+        `# src/a\n\nOne.[^1]\n\n${HOT}[^2]\n\n[^1]: src/a/a.ts (a)\n[^2]: git history of src/a (90 days)\n`,
+      );
+      expect(read(repo.dir, "docs/guide/modules/src-b.md")).toBe(stableSection("src/b", "src/b", "One.[^1]", ["[^1]: src/b/b.ts (b)"]));
+      expect(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections["modules/src-a"].evidence).toEqual([
+        expect.objectContaining({ id: "src/a/a.ts#a" }),
+        { id: "history:src/a", hash: sha256(HOT) },
+      ]);
+    });
+
+    it("describes a Module as stable when its many commits are over 90 days before HEAD", async () => {
+      const repo = createFixtureRepo(TWO_MODULES);
+      churnA(repo, 4);
+      repo.commit({ "src/b/b.ts": "export const b = 2;\n" }, "much later", "2099-01-01T00:00:00Z");
+
+      await generate(repo.dir, {}, { llm: scriptedLlm([claimOn("src/a/a.ts#a"), claimOn("src/b/b.ts#b")]) });
+
+      expect(read(repo.dir, "docs/guide/modules/src-a.md")).toContain(STABLE);
+    });
+
+    it("counts a commit to a nested Module towards that Module only", async () => {
+      const repo = createFixtureRepo({
+        "scribe.config.json": JSON.stringify({ modules: [{ name: "Outer", path: "src" }, { name: "Inner", path: "src/inner" }] }),
+        "src/outer.ts": "export const outer = 1;\n",
+        "src/inner/inner.ts": "export const inner = 1;\n",
+      });
+      for (let i = 0; i < 4; i++) repo.commit({ "src/inner/notes.md": `change ${i}\n` });
+
+      await generate(repo.dir, {}, { llm: scriptedLlm([claimOn("src/outer.ts#outer"), claimOn("src/inner/inner.ts#inner")]) });
+
+      expect(read(repo.dir, "docs/guide/modules/src.md")).toContain(STABLE);
+      expect(read(repo.dir, "docs/guide/modules/src-inner.md")).toContain(HOT);
+    });
+
+    it("cites the Module's commit history pinned to HEAD when origin is on GitHub", async () => {
+      const repo = createFixtureRepo(TWO_MODULES);
+      repo.git("remote", "add", "origin", "git@github.com:acme/app.git");
+      const sha = repo.git("rev-parse", "HEAD").trim();
+
+      await generate(repo.dir, {}, { llm: scriptedLlm([claimOn("src/a/a.ts#a"), claimOn("src/b/b.ts#b")]) });
+
+      expect(read(repo.dir, "docs/guide/modules/src-a.md")).toContain(
+        `[^2]: [git history of src/a (90 days)](https://github.com/acme/app/commits/${sha}/src/a)\n`,
+      );
+    });
+
+    it("names no commit author anywhere in the Guide", async () => {
+      const repo = createFixtureRepo(TARGET);
+      repo.git("config", "user.name", "Ada Lovelace");
+      repo.git("config", "user.email", "ada@example.com");
+      for (let i = 0; i < 4; i++) repo.commit({ "src/auth/notes.md": `change ${i}\n` });
+
+      await generate(repo.dir, {}, { llm: recordedLlm("generate") });
+
+      for (const file of ["docs/guide/modules/src-auth.md", "docs/guide/modules/src-billing.md"]) {
+        const section = read(repo.dir, file);
+        for (const name of ["Ada", "Lovelace", "ada@example.com", "Fixture", "fixture@example.com"]) expect(section).not.toContain(name);
+      }
+      expect(read(repo.dir, "docs/guide/modules/src-auth.md")).toContain(HOT);
+    });
+  });
+
   describe("verification", () => {
     const ONE_MODULE: Files = {
       "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
@@ -265,6 +345,7 @@ describe("generate", () => {
     };
     const SECTION = "docs/guide/modules/src-a.md";
     const CITED = ["src/a/a.ts#a"];
+    const aSection = (prose: string) => stableSection("A", "src/a", prose, ["[^1]: src/a/a.ts (a)"]);
     const section = (...texts: string[]) => ({
       paragraphs: [{ claims: texts.map((text) => ({ text, evidence: CITED })) }],
     });
@@ -275,7 +356,7 @@ describe("generate", () => {
 
       const result = await generate(repo.dir, {}, { llm });
 
-      expect(read(repo.dir, SECTION)).toBe("# A\n\nOne.[^1] Two.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+      expect(read(repo.dir, SECTION)).toBe(aSection("One.[^1] Two.[^1]"));
       expect(writes(llm)).toHaveLength(1);
       expect(llm.calls.filter((call) => call.model === MODELS.verify)).toHaveLength(2);
       expect(result.droppedClaims).toEqual([]);
@@ -314,7 +395,7 @@ describe("generate", () => {
 
       const result = await generate(repo.dir, {}, { llm });
 
-      expect(read(repo.dir, SECTION)).toBe("# A\n\nGood.[^1] Right.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+      expect(read(repo.dir, SECTION)).toBe(aSection("Good.[^1] Right.[^1]"));
       expect(result.droppedClaims).toEqual([]);
     });
 
@@ -327,7 +408,7 @@ describe("generate", () => {
 
       const result = await generate(repo.dir, {}, { llm });
 
-      expect(read(repo.dir, SECTION)).toBe("# A\n\nGood.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+      expect(read(repo.dir, SECTION)).toBe(aSection("Good.[^1]"));
       expect(writes(llm)).toHaveLength(2);
       expect(result.droppedClaims).toEqual([
         { section: "modules/src-a", text: "Still wrong.", reason: "a is a number" },
@@ -341,21 +422,23 @@ describe("generate", () => {
 
       const result = await generate(repo.dir, {}, { llm });
 
-      expect(read(repo.dir, SECTION)).toBe("# A\n\nGood.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+      expect(read(repo.dir, SECTION)).toBe(aSection("Good.[^1]"));
       expect(writes(llm)).toHaveLength(2);
       expect(result.droppedClaims).toEqual([
         { section: "modules/src-a", text: "Uncited.", reason: expect.stringContaining("no Evidence") },
       ]);
     });
 
-    it("leaves a Section with only unconfirmed Claims bare, citing nothing", async () => {
+    it("leaves a Section with only unconfirmed Claims citing nothing but its git history", async () => {
       const repo = createFixtureRepo(ONE_MODULE);
       const llm = scriptedLlm(section("Wrong."), { "Wrong.": { confirmed: false, reason: "no" } });
 
       await generate(repo.dir, {}, { llm });
 
-      expect(read(repo.dir, SECTION)).toBe("# A\n");
-      expect(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections["modules/src-a"].evidence).toEqual([]);
+      expect(read(repo.dir, SECTION)).toBe(stableSection("A", "src/a", ""));
+      expect(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections["modules/src-a"].evidence).toEqual([
+        { id: "history:src/a", hash: sha256(STABLE) },
+      ]);
     });
 
     it("costs nothing to re-run after a repair", async () => {

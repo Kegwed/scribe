@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { MODELS } from "../llm.ts";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { type RecordedLlm, recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
+import { HOT, STABLE, stableSection } from "../test/sections.ts";
 import { generate } from "./generate.ts";
 import { status } from "./status.ts";
 import { update } from "./update.ts";
@@ -96,7 +97,7 @@ describe("update", () => {
 
     await update(repo.dir, {}, { llm });
 
-    expect(read(repo.dir, A)).toBe("# A\n\nA returns two.[^1] K is three.[^2]\n\n[^1]: src/a/a.ts (a)\n[^2]: src/a/a.ts (k)\n");
+    expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "A returns two.[^1] K is three.[^2]", ["[^1]: src/a/a.ts (a)", "[^2]: src/a/a.ts (k)"]));
     expect(read(repo.dir, B)).toBe(before);
     expect(writes(llm)).toHaveLength(1);
     const { prompt } = writes(llm)[0]!;
@@ -104,15 +105,37 @@ describe("update", () => {
     expect(prompt).toContain("[^1]: src/a/a.ts#a");
     expect(prompt).toContain('<changed id="src/a/a.ts#a" status="changed"/>');
     expect(prompt).not.toContain('<changed id="src/a/a.ts#k"');
+    // Scribe writes the churn Claim itself, so the model never sees it to revise.
+    expect(prompt).not.toContain(STABLE);
+    expect(prompt).not.toContain("history:");
     const { sections } = JSON.parse(read(repo.dir, ".scribe/manifest.json"));
     expect(sections["modules/src-a"]).toEqual({
       file: A,
       evidence: [
         { id: "src/a/a.ts#a", hash: sha256("export function a() {\n  return 2;\n}") },
         kRecord,
+        { id: "history:src/a", hash: sha256(STABLE) },
       ],
       contentHash: sha256(read(repo.dir, A)),
     });
+  });
+
+  it("rewrites a Section whose Module has turned hot, keeping the Claims the model wrote", async () => {
+    const repo = await generated();
+    const before = read(repo.dir, B);
+    for (let i = 0; i < 4; i++) repo.commit({ "src/a/notes.md": `change ${i}\n` });
+    const llm = scriptedLlm({
+      paragraphs: [{ claims: [{ text: "A returns one.", evidence: ["src/a/a.ts#a"] }, { text: "K is three.", evidence: ["src/a/a.ts#k"] }] }],
+    });
+
+    await update(repo.dir, {}, { llm });
+
+    expect(read(repo.dir, A)).toBe(
+      `# A\n\nA returns one.[^1] K is three.[^2]\n\n${HOT}[^3]\n\n[^1]: src/a/a.ts (a)\n[^2]: src/a/a.ts (k)\n[^3]: git history of src/a (90 days)\n`,
+    );
+    expect(read(repo.dir, B)).toBe(before);
+    expect(writes(llm)[0]!.prompt).not.toContain("<changed ");
+    expect(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections["modules/src-a"].evidence).toContainEqual({ id: "history:src/a", hash: sha256(HOT) });
   });
 
   it("tells the model which cited symbols are gone", async () => {
@@ -123,7 +146,7 @@ describe("update", () => {
     await update(repo.dir, {}, { llm });
 
     expect(writes(llm)[0]!.prompt).toContain('<changed id="src/a/a.ts#k" status="gone"/>');
-    expect(read(repo.dir, A)).toBe("# A\n\nA returns one.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+    expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "A returns one.[^1]", ["[^1]: src/a/a.ts (a)"]));
   });
 
   it("verifies a regenerated Section, dropping and reporting Claims its repair leaves unconfirmed", async () => {
@@ -137,7 +160,7 @@ describe("update", () => {
     expect(writes(llm)).toHaveLength(2);
     expect(writes(llm)[1]!.prompt).toContain("a returns 2");
     expect(writes(llm)[1]!.prompt).toContain("<current-section>\n# A\n\nA returns one.[^1] K is three.[^2]");
-    expect(read(repo.dir, A)).toBe("# A\n\nK is three.[^1]\n\n[^1]: src/a/a.ts (k)\n");
+    expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "K is three.[^1]", ["[^1]: src/a/a.ts (k)"]));
     expect(result.droppedClaims).toEqual([{ section: "modules/src-a", text: "A returns three.", reason: "a returns 2" }]);
   });
 
@@ -152,7 +175,7 @@ describe("update", () => {
 
     await update(repo.dir, {}, { llm });
 
-    expect(read(repo.dir, "docs/guide/modules/src-c.md")).toBe("# C\n\nC is one.[^1]\n\n[^1]: src/c/c.ts (c)\n");
+    expect(read(repo.dir, "docs/guide/modules/src-c.md")).toBe(stableSection("C", "src/c", "C is one.[^1]", ["[^1]: src/c/c.ts (c)"]));
     expect([read(repo.dir, A), read(repo.dir, B)]).toEqual(before);
     expect(writes(llm)).toHaveLength(1);
     expect(writes(llm)[0]!.prompt).not.toContain("<current-section>");
@@ -189,7 +212,7 @@ describe("update", () => {
 
     expect(read(repo.dir, A)).toBe("# A\n\nMy words.\n");
     expect(read(repo.dir, B)).toBe("# B\n\nMine too.\n");
-    expect(read(repo.dir, A_PROPOSAL)).toBe("# A\n\nA returns two.[^1] K is three.[^2]\n\n[^1]: src/a/a.ts (a)\n[^2]: src/a/a.ts (k)\n");
+    expect(read(repo.dir, A_PROPOSAL)).toBe(stableSection("A", "src/a", "A returns two.[^1] K is three.[^2]", ["[^1]: src/a/a.ts (a)", "[^2]: src/a/a.ts (k)"]));
     expect(existsSync(join(repo.dir, B_PROPOSAL))).toBe(false);
     expect(result.frozen).toEqual([]);
     expect(result.proposals).toEqual([{ section: "modules/src-a", file: A_PROPOSAL }]);
@@ -213,7 +236,7 @@ describe("update", () => {
 
     expect(writes(llm)).toHaveLength(2);
     expect(writes(llm)[1]!.prompt).toContain("a returns 2");
-    expect(read(repo.dir, A_PROPOSAL)).toBe("# A\n\nK is three.[^1]\n\n[^1]: src/a/a.ts (k)\n");
+    expect(read(repo.dir, A_PROPOSAL)).toBe(stableSection("A", "src/a", "K is three.[^1]", ["[^1]: src/a/a.ts (k)"]));
     expect(read(repo.dir, A)).toBe("# A\n\nMy words.\n");
     expect(result.droppedClaims).toEqual([{ section: "modules/src-a", text: "A returns three.", reason: "a returns 2", proposal: true }]);
   });
@@ -259,7 +282,7 @@ describe("update", () => {
 
     await update(repo.dir, {}, { llm });
 
-    expect(read(repo.dir, B)).toBe("# B\n\nB is one.[^1]\n\n[^1]: src/b/b.ts (b)\n");
+    expect(read(repo.dir, B)).toBe(stableSection("B", "src/b", "B is one.[^1]", ["[^1]: src/b/b.ts (b)"]));
     // Written from scratch, the request is the one generate made, so the cache answers it.
     expect(llm.calls).toEqual([]);
   });
