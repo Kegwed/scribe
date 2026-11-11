@@ -8,7 +8,8 @@ import { CONFIG_FILE } from "./config.ts";
 import { CACHE_DIR } from "./manifest.ts";
 import { connectGitHub } from "./github.ts";
 import { claudeLlm } from "./llm.ts";
-import type { Confirm, WriteReport } from "./section-writer.ts";
+import type { Confirm } from "./estimate.ts";
+import type { WriteReport } from "./section-writer.ts";
 
 /**
  * The eval: `generate` run with the live LLM on real Target repos, scored by

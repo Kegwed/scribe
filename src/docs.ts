@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { CodeSymbol } from "./analyser.ts";
 import { contentHash } from "./hash.ts";
 import type { Module } from "./modules.ts";
-import type { FileEvidence } from "./evidence.ts";
+import type { Evidence, FileEvidence } from "./evidence.ts";
 
 /**
  * One heading's part of an existing doc in the Target repo, such as the README
@@ -112,4 +112,9 @@ export function docsAbout(module: Module, symbols: CodeSymbol[], docs: DocEviden
     (module.path !== "." && text.includes(module.path)) ||
     [...names].some((name) => new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$")}(?![\\w$])`).test(text)),
   );
+}
+
+/** Whether a piece of Evidence is a passage of an existing doc. */
+export function isDoc(e: Evidence): e is DocEvidence {
+  return e.kind === "doc";
 }

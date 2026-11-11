@@ -11,7 +11,8 @@ import type { Adapters } from "./adapters.ts";
 import { connectGitHub } from "./github.ts";
 import { claudeLlm } from "./llm.ts";
 import type { DriftReport } from "./manifest.ts";
-import type { Confirm, WriteReport } from "./section-writer.ts";
+import type { Confirm } from "./estimate.ts";
+import type { WriteReport } from "./section-writer.ts";
 import { isTopLevelSection } from "./target.ts";
 
 const USAGE = "Usage: scribe <command> [--yes]\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module, then Overview and Architecture from them\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules, pending Proposals, Unsupported Claims and Drift between existing docs and the code; exits 1 unless only Frozen Sections, Unsupported Claims or Drift need attention\n  adopt <section>  Take a Frozen Section's text as the new baseline, recording its Evidence and Unsupported Claims\n  reset <section>  Discard a Section's human edits and regenerate it\n\ngenerate and update print a cost estimate and ask before calling the LLM; --yes skips asking.";

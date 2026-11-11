@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { fakeGitHub } from "../test/fake-github.ts";
-import type { CostEstimate } from "../section-writer.ts";
+import type { CostEstimate } from "../estimate.ts";
 import { isSectionWrite, recordedLlm, type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { HOT, STABLE, stableSection } from "../test/sections.ts";
 import { generate } from "./generate.ts";

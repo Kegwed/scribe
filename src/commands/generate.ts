@@ -1,7 +1,8 @@
 import type { Adapters } from "../adapters.ts";
 import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR, isFrozen, recordedDrift } from "../manifest.ts";
-import { confirmed, type CostEstimate, emptyReport, estimateRun, type RunOptions, sectionWriter, type WriteReport } from "../section-writer.ts";
+import { confirmed, type CostEstimate, estimateRun, type RunOptions } from "../estimate.ts";
+import { emptyReport, sectionWriter, type WriteReport } from "../section-writer.ts";
 import { allEvidence, changedEvidence, guideSections, openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
 
