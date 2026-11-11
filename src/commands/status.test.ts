@@ -29,8 +29,8 @@ describe("status", () => {
     const { sections } = await status(repo.dir);
 
     expect(sections).toEqual([
-      { section: "modules/src-a", file: "docs/guide/modules/src-a.md", frozen: false, stale: false, changedEvidence: [] },
-      { section: "modules/src-b", file: "docs/guide/modules/src-b.md", frozen: false, stale: false, changedEvidence: [] },
+      { section: "modules/src-a", file: "docs/guide/modules/src-a.md", missing: false, frozen: false, stale: false, changedEvidence: [] },
+      { section: "modules/src-b", file: "docs/guide/modules/src-b.md", missing: false, frozen: false, stale: false, changedEvidence: [] },
     ]);
   });
 

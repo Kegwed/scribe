@@ -33,13 +33,13 @@ async function main(argv: string[]): Promise<number> {
     }
     case "status": {
       const { sections } = await status(process.cwd());
-      const attention = sections.filter((s) => s.frozen || s.stale);
-      for (const { section, frozen, stale, changedEvidence } of attention) {
-        const label = frozen && stale ? "Frozen and Stale" : frozen ? "Frozen" : "Stale";
-        console.log(`${label}: ${section}${stale ? ` (changed: ${changedEvidence.join(", ")})` : ""}`);
+      const attention = sections.filter((s) => s.missing || s.frozen || s.stale);
+      for (const { section, missing, frozen, stale, changedEvidence } of attention) {
+        const label = missing ? "Missing" : frozen && stale ? "Frozen and Stale" : frozen ? "Frozen" : "Stale";
+        console.log(`${label}: ${section}${stale && !missing ? ` (changed: ${changedEvidence.join(", ")})` : ""}`);
       }
       if (attention.length === 0) console.log(`All ${sections.length} Section${sections.length === 1 ? "" : "s"} current.`);
-      return sections.some((s) => s.stale) ? 1 : 0;
+      return sections.some((s) => s.missing || s.stale) ? 1 : 0;
     }
     default:
       console.error(USAGE);

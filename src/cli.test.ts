@@ -71,6 +71,16 @@ describe("scribe status", () => {
     expect(stdout).toBe("Frozen: modules/src-b\n");
     expect(status).toBe(0);
   });
+
+  it("lists a Section whose file is gone and exits non-zero", async () => {
+    const repo = await generated();
+    repo.git("rm", "--quiet", "docs/guide/modules/src-b.md");
+
+    const { status, stdout } = scribe(repo.dir, "status");
+
+    expect(stdout).toBe("Missing: modules/src-b\n");
+    expect(status).toBe(1);
+  });
 });
 
 it("scribe init prints the detected Modules and their public surface", () => {

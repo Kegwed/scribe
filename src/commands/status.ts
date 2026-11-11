@@ -10,6 +10,8 @@ export interface SectionStatus {
   section: string;
   /** Repo-relative path of the Section's file. */
   file: string;
+  /** The Section's file is gone; `generate` writes it again. */
+  missing: boolean;
   /** A human has edited the Section since Scribe last wrote it (ADR-0002). */
   frozen: boolean;
   /** Evidence the Section cites has changed since Scribe last wrote it. */
@@ -41,6 +43,7 @@ export async function status(repoDir: string): Promise<StatusResult> {
     return {
       section,
       file: record.file,
+      missing: content === undefined,
       frozen: isFrozen(content, record),
       stale: changedEvidence.length > 0,
       changedEvidence,
