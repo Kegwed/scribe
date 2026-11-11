@@ -125,7 +125,6 @@ export async function readSection(repoDir: string, path: string): Promise<string
   }
 }
 
-/** The Module whose Section is `section`; throws if no current Module has it. */
 /**
  * Throws unless `section` is one of the Guide's Sections, such as one whose
  * Module was removed; returns the Module whose Section it is, if any.

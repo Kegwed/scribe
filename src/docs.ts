@@ -105,10 +105,7 @@ function slugOf(heading: string): string {
   return heading.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").trim().replace(/\s/g, "-");
 }
 
-/**
- * The passages that concern a Module: those naming its directory or a symbol
- * it exports. Others would only crowd the prompt.
- */
+/** The passages that concern a Module: those naming its directory or a symbol it exports. */
 export function docsAbout(module: Module, symbols: CodeSymbol[], docs: DocEvidence[]): DocEvidence[] {
   const names = new Set(symbols.filter((s) => s.module === module.path).flatMap((s) => s.exportedAs).filter((n) => n !== "default"));
   return docs.filter(({ text }) =>

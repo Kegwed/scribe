@@ -276,7 +276,7 @@ export function sectionWriter(
       };
     }
     if (section === KEY_DECISIONS) {
-      // The ADRs, then the discussion on the repo's highest-ranked pull requests (ADR-0005).
+      // The ADRs, then the discussion on the repo's highest-ranked pull requests, as spec #1's Generation order decides.
       const items: Evidence[] = [...decisionRecords(docs), ...discussions.decisions];
       return {
         title: "Key decisions",
