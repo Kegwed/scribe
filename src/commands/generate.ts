@@ -1,4 +1,5 @@
 import type { Adapters } from "../adapters.ts";
+import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR, isFrozen } from "../manifest.ts";
 import { type Confirm, confirmed, type CostEstimate, emptyReport, sectionWriter, totalCost, type WriteReport } from "../section-writer.ts";
 import { guideSections, openTarget, readSection, sectionPath } from "../target.ts";
@@ -28,11 +29,12 @@ export interface GenerateResult extends WriteReport {
 export async function generate(
   repoDir: string,
   { confirm }: GenerateOptions,
-  { llm }: Pick<Adapters, "llm">,
+  { llm, github }: Adapters,
 ): Promise<GenerateResult> {
   const target = await openTarget(repoDir);
   const report = emptyReport();
-  const writer = sectionWriter(repoDir, target, llm, report);
+  const discussions = github && (await gitHubEvidence(repoDir, github, target.modules, report.warnings));
+  const writer = sectionWriter(repoDir, target, llm, report, discussions);
 
   const planned: { section: string; existing: string | undefined }[] = [];
   for (const section of guideSections(target)) {

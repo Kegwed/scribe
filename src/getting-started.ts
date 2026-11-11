@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { contentHash } from "./hash.ts";
-import type { Evidence } from "./section-writer.ts";
+import type { FileEvidence } from "./section-writer.ts";
 
 /** The Getting started Section's id, which is also its file's path in the Guide, without the extension. */
 export const GETTING_STARTED = "getting-started";
@@ -13,7 +13,7 @@ export const GETTING_STARTED = "getting-started";
  * `package.json` script, CI workflow step that runs commands, and shell block
  * in the repo's existing docs, each with the commands it lets a reader run.
  */
-export interface SetupEvidence extends Evidence {
+export interface SetupEvidence extends FileEvidence {
   /** Commands this item shows to exist, whitespace normalised. */
   commands: string[];
 }

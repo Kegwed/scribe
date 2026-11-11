@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { type CodeSymbol, typescriptAnalyser } from "./analyser.ts";
 import { CONFIG_FILE, type Config, loadConfig } from "./config.ts";
 import { GETTING_STARTED, type SetupEvidence, setupEvidence } from "./getting-started.ts";
-import type { Evidence } from "./section-writer.ts";
+import type { FileEvidence } from "./section-writer.ts";
+import { isGitHubEvidence } from "./github.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
 import { detectModules, type Module } from "./modules.ts";
 
@@ -38,7 +39,7 @@ export function guideSections({ sectionIds }: Target): string[] {
 }
 
 /** Every piece of Evidence a Section could cite, as it is now. */
-export function allEvidence({ symbols, setup }: Target): Evidence[] {
+export function allEvidence({ symbols, setup }: Target): FileEvidence[] {
   return [...symbols, ...setup];
 }
 
@@ -54,10 +55,14 @@ export function proposalPath(config: Config, section: string): string {
 
 export const PROPOSAL_SUFFIX = ".proposal.md";
 
-/** Ids of the Evidence a Section cites whose text has changed or which no longer exists; the Section is Stale if any. */
-export function changedEvidence(record: SectionRecord, evidence: Evidence[]): string[] {
+/**
+ * Ids of the Evidence a Section cites whose text has changed or which no
+ * longer exists; the Section is Stale if any. GitHub Evidence never counts:
+ * `status` makes no network calls, so it can't see GitHub change.
+ */
+export function changedEvidence(record: SectionRecord, evidence: FileEvidence[]): string[] {
   const hashes = new Map(evidence.map((s) => [s.id, s.hash]));
-  return record.evidence.filter(({ id, hash }) => hashes.get(id) !== hash).map(({ id }) => id);
+  return record.evidence.filter(({ id, hash }) => !isGitHubEvidence(id) && hashes.get(id) !== hash).map(({ id }) => id);
 }
 
 /** A Section file's content, or undefined if it doesn't exist. */
