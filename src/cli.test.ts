@@ -38,7 +38,7 @@ describe("scribe generate's cost estimate", () => {
 
     const { status, stdout } = scribeWithInput(repo.dir, "n\n", "generate");
 
-    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 2 Sections, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\n  modules\/src-b  \$\d+\.\d+\n  plus 1 cached Section at no cost\nContinue\? \[y\/N\] /);
+    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 2 Sections, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\n  modules\/src-b  \$\d+\.\d+\n  plus 2 cached Sections at no cost\nContinue\? \[y\/N\] /);
     expect(stdout).toMatch(/Cancelled; no LLM was called and nothing was written\.\n$/);
     expect(status).toBe(1);
     expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
@@ -89,7 +89,7 @@ describe("scribe status", () => {
 
     const { status, stdout } = scribe(repo.dir, "status");
 
-    expect(stdout).toBe("All 3 Sections current.\n");
+    expect(stdout).toBe("All 4 Sections current.\n");
     expect(status).toBe(0);
   });
 
@@ -262,7 +262,7 @@ describe("scribe update", () => {
       "",
     ].join("\n"));
     expect(update.status).toBe(0);
-    expect(scribe(repo.dir, "status").stdout).toBe("All 2 Sections current.\n");
+    expect(scribe(repo.dir, "status").stdout).toBe("All 3 Sections current.\n");
   });
 });
 

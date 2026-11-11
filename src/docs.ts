@@ -44,7 +44,16 @@ function isExistingDoc(file: string, guideDir: string): boolean {
   if (!DOC_FILE.test(file) || file.startsWith(`${guideDir.replace(/\/$/, "")}/`)) return false;
   const segments = file.split("/");
   if (segments.some((s) => s.startsWith(".") || s === "node_modules")) return false;
-  return NAMED_DOC.test(segments.at(-1)!) || segments.slice(0, -1).some((s) => DECISION_DIRS.has(s.toLowerCase()));
+  return NAMED_DOC.test(segments.at(-1)!) || inDecisionDir(segments);
+}
+
+/** Whether a passage is from an ADR: a doc in an `adr`, `adrs` or `decisions` directory. */
+export function isDecisionRecord({ file }: DocEvidence): boolean {
+  return inDecisionDir(file.split("/"));
+}
+
+function inDecisionDir(segments: string[]): boolean {
+  return segments.slice(0, -1).some((s) => DECISION_DIRS.has(s.toLowerCase()));
 }
 
 /** The doc's passages, one per heading, plus one for any text before the first. */

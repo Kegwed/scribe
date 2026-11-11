@@ -29,23 +29,33 @@ export const PULL_REQUESTS_PER_MODULE = 5;
 /** A pull request's rank halves for each year it was merged before the newest one. */
 const RANK_HALF_LIFE_DAYS = 365;
 
+/** The GitHub Evidence the Sections draw on. */
+export interface Discussions {
+  /** Each Module's, keyed by Module path. */
+  byModule: Map<string, GitHubEvidence[]>;
+  /** Key decisions'. */
+  decisions: GitHubEvidence[];
+}
+
+export const NO_DISCUSSIONS: Discussions = { byModule: new Map(), decisions: [] };
+
 /**
- * GitHub Evidence for each Module, keyed by Module path: the discussion on the
- * merged pull requests that touched its files, and the issues they link to,
- * from the highest-ranked pull requests only. If GitHub fails, there is none,
- * and `warnings` says why, so Scribe carries on with its other Sources.
+ * GitHub Evidence for each Module: the discussion on the merged pull requests
+ * that touched its files, and the issues they link to, from the
+ * highest-ranked pull requests only. If GitHub fails, there is none, and
+ * `warnings` says why, so Scribe carries on with its other Sources.
  */
 export async function gitHubEvidence(
   repoDir: string,
   github: GitHub,
   modules: Module[],
   warnings: string[],
-): Promise<Map<string, GitHubEvidence[]>> {
+): Promise<Discussions> {
   try {
-    return await rankedEvidence(repoDir, github, modules);
+    return { byModule: await rankedEvidence(repoDir, github, modules), decisions: [] };
   } catch (error) {
     warnings.push(`GitHub skipped, so no pull requests or issues are cited: ${error instanceof Error ? error.message : String(error)}`);
-    return new Map();
+    return NO_DISCUSSIONS;
   }
 }
 

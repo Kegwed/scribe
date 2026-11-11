@@ -7,6 +7,7 @@ import { type DocEvidence, readDocs } from "./docs.ts";
 import { GETTING_STARTED, type SetupEvidence, setupEvidence } from "./getting-started.ts";
 import type { FileEvidence } from "./section-writer.ts";
 import { isGitHubEvidence } from "./github.ts";
+import { KEY_DECISIONS } from "./key-decisions.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
 import { detectModules, type Module } from "./modules.ts";
 
@@ -37,9 +38,9 @@ export async function openTarget(repoDir: string): Promise<Target> {
   return { config, modules, sectionIds, symbols, setup, docs, manifest };
 }
 
-/** Every Section the Guide should have: one per Module, then Getting started. */
+/** Every Section the Guide should have: one per Module, then Getting started, then Key decisions. */
 export function guideSections({ sectionIds }: Target): string[] {
-  return [...sectionIds.values(), GETTING_STARTED];
+  return [...sectionIds.values(), GETTING_STARTED, KEY_DECISIONS];
 }
 
 /** Every piece of Evidence a Section could cite, as it is now. */

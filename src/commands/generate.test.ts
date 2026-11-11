@@ -113,7 +113,7 @@ describe("generate", () => {
     await generate(repo.dir, {}, { llm: recordedLlm("generate") });
 
     const { sections } = JSON.parse(read(repo.dir, ".scribe/manifest.json"));
-    expect(Object.keys(sections)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started"]);
+    expect(Object.keys(sections)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started", "key-decisions"]);
     expect(sections["modules/src-billing"]).toEqual({
       file: "docs/guide/modules/src-billing.md",
       evidence: [{
@@ -146,8 +146,8 @@ describe("generate", () => {
 
       expect(asked).toHaveLength(1);
       const [estimate] = asked;
-      // TARGET has no scripts, CI or docs, so Getting started is written bare and costs nothing.
-      expect(estimate!.sections.map((s) => s.section)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started"]);
+      // TARGET has no scripts, CI or docs, so Getting started and Key decisions are written bare and cost nothing.
+      expect(estimate!.sections.map((s) => s.section)).toEqual(["modules/src-auth", "modules/src-billing", "getting-started", "key-decisions"]);
       for (const section of estimate!.sections.slice(0, 2)) {
         expect(section.tokens).toBeGreaterThan(0);
         expect(section.dollars).toBeGreaterThan(0);
