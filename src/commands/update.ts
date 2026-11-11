@@ -9,11 +9,14 @@ export interface UpdateOptions {}
 export interface UpdateResult extends WriteReport {
   /** Sections whose Module no longer exists: their records are dropped, their files left for a human to delete. */
   removed: { section: string; file: string }[];
+  /** Proposals written for Frozen, Stale Sections, for a human to merge by hand (ADR-0002). */
+  proposals: { section: string; file: string }[];
 }
 
 /**
  * Regenerates each Stale Section a human hasn't edited, keeping the text its
- * changed Evidence doesn't affect, and leaves every other Section untouched.
+ * changed Evidence doesn't affect, writes a Proposal beside each one a human
+ * has, and leaves every other Section untouched.
  */
 export async function update(
   repoDir: string,
@@ -22,7 +25,7 @@ export async function update(
 ): Promise<UpdateResult> {
   const target = await openTarget(repoDir);
   await gitIgnore(repoDir, CACHE_DIR);
-  const result: UpdateResult = { ...emptyReport(), removed: [] };
+  const result: UpdateResult = { ...emptyReport(), removed: [], proposals: [] };
   const writer = sectionWriter(repoDir, target, llm, result);
 
   const { sections } = target.manifest;
@@ -42,6 +45,7 @@ export async function update(
     if (!fromScratch && changed.length === 0) continue;
     if (isFrozen(existing, record)) {
       result.frozen.push(section);
+      result.proposals.push({ section, file: await writer.propose(module) });
       continue;
     }
     await writer.write(module, existing, fromScratch ? undefined : changed);

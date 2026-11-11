@@ -6,7 +6,7 @@ import { contentHash } from "./hash.ts";
 import { completeCached, type Llm, MODELS } from "./llm.ts";
 import { saveManifest } from "./manifest.ts";
 import type { Module } from "./modules.ts";
-import { sectionPath, type Target } from "./target.ts";
+import { proposalPath, readSection, sectionPath, type Target } from "./target.ts";
 
 export interface WriteReport {
   /** Claims still unconfirmed after the Section's repair, left out of their Sections (ADR-0001). */
@@ -29,68 +29,80 @@ export interface SectionWriter {
    * what those changes don't affect. Never checks whether the Section is Frozen.
    */
   write(module: Module, existing: string | undefined, changedEvidence?: string[]): Promise<void>;
+  /**
+   * Writes a Proposal for a Module's Frozen Section: the Section written afresh
+   * from the code and verified like any other, beside the Section's file and
+   * never recorded in the manifest (ADR-0002). Returns its repo-relative path.
+   */
+  propose(module: Module): Promise<string>;
 }
 
 export function sectionWriter(repoDir: string, target: Target, llm: Llm, report: WriteReport): SectionWriter {
   const { config, sectionIds, symbols, manifest } = target;
   const permalinks = githubPermalinks(repoDir);
 
+  /** A Module's Section, verified, with the symbols it cites; revised from `existing` given `changedEvidence`. */
+  async function compose(module: Module, existing: string | undefined, changedEvidence: string[] | undefined) {
+    const section = sectionIds.get(module)!;
+    const record = manifest.sections[section];
+
+    const evidence = new Map(symbols.filter((s) => s.module === module.path).map((s) => [s.id, s]));
+    const writeSection = (prompt: string) =>
+      completeCached(llm, repoDir, { model: MODELS.write, system: SECTION_SYSTEM, prompt, schema: SECTION_SCHEMA }, parseSection);
+    const firstPrompt = changedEvidence && existing !== undefined && record
+      ? revisionPrompt(module, [...evidence.values()], citingIds(existing, record.evidence.map((e) => e.id)), changedEvidence)
+      : sectionPrompt(module, [...evidence.values()]);
+    let written: SectionResponse = evidence.size === 0 ? { paragraphs: [] } : await writeSection(firstPrompt);
+    let failures = await verifySection(llm, repoDir, written, evidence);
+    if (failures.size > 0) {
+      written = await writeSection(repairPrompt(firstPrompt, written, failures));
+      failures = await verifySection(llm, repoDir, written, evidence);
+    }
+    const { paragraphs } = written;
+
+    const cited = new Map<string, CodeSymbol>();
+    const body: string[] = [];
+    for (const { claims } of paragraphs) {
+      const sentences: string[] = [];
+      for (const claim of claims) {
+        const { text, evidence: ids } = claim;
+        const reason = failures.get(claim);
+        if (reason !== undefined) {
+          report.droppedClaims.push({ section, text, reason });
+          continue;
+        }
+        const known = ids.filter((id) => evidence.has(id));
+        for (const id of known) cited.set(id, evidence.get(id)!);
+        const numbers = [...cited.keys()];
+        sentences.push(text + [...new Set(known)].map((id) => `[^${numbers.indexOf(id) + 1}]`).join(""));
+      }
+      if (sentences.length > 0) body.push(sentences.join(" "));
+    }
+
+    const citedSymbols = [...cited.values()];
+    const footnotes = citedSymbols.map((symbol, i) => `[^${i + 1}]: ${citation(symbol, permalinks)}`);
+    const content = [`# ${module.name}`, ...body, ...(footnotes.length > 0 ? [footnotes.join("\n")] : [])].join("\n\n") + "\n";
+    return { section, content, citedSymbols };
+  }
+
+  /** Writes `content` to `path` unless `previous` differs from it only in where its links pin; returns whether it wrote. */
+  async function save(path: string, previous: string | undefined, section: string, content: string, citedSymbols: CodeSymbol[], sameEvidence: boolean) {
+    // Unchanged but for where its links pin: the old pins still point at this same text, so rewriting would only churn.
+    if (previous !== undefined && withoutPins(previous) === withoutPins(content) && sameEvidence) return false;
+    if (permalinks) report.warnings.push(...uncommittedWarnings(repoDir, section, citedSymbols));
+    const file = join(repoDir, path);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, content);
+    return true;
+  }
+
   return {
     async write(module, existing, changedEvidence) {
-      const section = sectionIds.get(module)!;
+      const { section, content, citedSymbols } = await compose(module, existing, changedEvidence);
       const path = sectionPath(config, section);
-      const record = manifest.sections[section];
-
-      const evidence = new Map(symbols.filter((s) => s.module === module.path).map((s) => [s.id, s]));
-      const writeSection = (prompt: string) =>
-        completeCached(llm, repoDir, { model: MODELS.write, system: SECTION_SYSTEM, prompt, schema: SECTION_SCHEMA }, parseSection);
-      const firstPrompt = changedEvidence && existing !== undefined && record
-        ? revisionPrompt(module, [...evidence.values()], citingIds(existing, record.evidence.map((e) => e.id)), changedEvidence)
-        : sectionPrompt(module, [...evidence.values()]);
-      let written: SectionResponse = evidence.size === 0 ? { paragraphs: [] } : await writeSection(firstPrompt);
-      let failures = await verifySection(llm, repoDir, written, evidence);
-      if (failures.size > 0) {
-        written = await writeSection(repairPrompt(firstPrompt, written, failures));
-        failures = await verifySection(llm, repoDir, written, evidence);
-      }
-      const { paragraphs } = written;
-
-      const cited = new Map<string, CodeSymbol>();
-      const body: string[] = [];
-      for (const { claims } of paragraphs) {
-        const sentences: string[] = [];
-        for (const claim of claims) {
-          const { text, evidence: ids } = claim;
-          const reason = failures.get(claim);
-          if (reason !== undefined) {
-            report.droppedClaims.push({ section, text, reason });
-            continue;
-          }
-          const known = ids.filter((id) => evidence.has(id));
-          for (const id of known) cited.set(id, evidence.get(id)!);
-          const numbers = [...cited.keys()];
-          sentences.push(text + [...new Set(known)].map((id) => `[^${numbers.indexOf(id) + 1}]`).join(""));
-        }
-        if (sentences.length > 0) body.push(sentences.join(" "));
-      }
-
-      const citedSymbols = [...cited.values()];
-      const footnotes = citedSymbols.map((symbol, i) => `[^${i + 1}]: ${citation(symbol, permalinks)}`);
-      const content = [`# ${module.name}`, ...body, ...(footnotes.length > 0 ? [footnotes.join("\n")] : [])].join("\n\n") + "\n";
       const evidenceRecords = citedSymbols.map(({ id, hash }) => ({ id, hash }));
-      // Unchanged but for where its links pin: the old pins still point at this same text, so rewriting would only churn.
-      if (
-        existing !== undefined &&
-        withoutPins(existing) === withoutPins(content) &&
-        JSON.stringify(record?.evidence) === JSON.stringify(evidenceRecords)
-      ) {
-        return;
-      }
-      if (permalinks) report.warnings.push(...uncommittedWarnings(repoDir, section, citedSymbols));
-
-      const file = join(repoDir, path);
-      await mkdir(dirname(file), { recursive: true });
-      await writeFile(file, content);
+      const sameEvidence = JSON.stringify(manifest.sections[section]?.evidence) === JSON.stringify(evidenceRecords);
+      if (!(await save(path, existing, section, content, citedSymbols, sameEvidence))) return;
       manifest.sections[section] = {
         file: path,
         evidence: evidenceRecords,
@@ -98,6 +110,13 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
       };
       // Saved per Section: a file written but unrecorded would read as Frozen on the next run.
       await saveManifest(repoDir, manifest);
+    },
+
+    async propose(module) {
+      const { section, content, citedSymbols } = await compose(module, undefined, undefined);
+      const path = proposalPath(config, section);
+      await save(path, await readSection(repoDir, path), section, content, citedSymbols, true);
+      return path;
     },
   };
 }

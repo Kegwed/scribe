@@ -85,6 +85,23 @@ describe("status", () => {
     expect(sections[0]).toMatchObject({ section: "modules/src-a", frozen: true, stale: true });
   });
 
+  it("lists pending Proposals", async () => {
+    const repo = await generated();
+    repo.commit({ "docs/guide/modules/src-b.proposal.md": "# B\n\nB is one.\n" });
+
+    const { proposals } = await status(repo.dir);
+
+    expect(proposals).toEqual([{ section: "modules/src-b", file: "docs/guide/modules/src-b.proposal.md" }]);
+  });
+
+  it("lists no Proposals when none are pending", async () => {
+    const repo = await generated();
+
+    const { proposals } = await status(repo.dir);
+
+    expect(proposals).toEqual([]);
+  });
+
   it("reports a Module added since generate as needing a Section", async () => {
     const repo = await generated();
     repo.commit({

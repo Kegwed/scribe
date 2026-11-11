@@ -32,6 +32,11 @@ export function sectionPath(config: Config, section: string): string {
   return `${config.guideDir}/${section}.md`;
 }
 
+/** Repo-relative path of the Proposal for a Section, written beside the Section's file (ADR-0002). */
+export function proposalPath(config: Config, section: string): string {
+  return `${config.guideDir}/${section}.proposal.md`;
+}
+
 /** Ids of the symbols a Section cites whose text has changed or which no longer exist; the Section is Stale if any. */
 export function changedEvidence(record: SectionRecord, symbols: CodeSymbol[]): string[] {
   const hashes = new Map(symbols.map((s) => [s.id, s.hash]));

@@ -72,6 +72,23 @@ describe("scribe status", () => {
     expect(status).toBe(0);
   });
 
+  it("lists a pending Proposal and exits non-zero while it exists", async () => {
+    const repo = await generated();
+    repo.commit({ "docs/guide/modules/src-b.md": "# B\n\nMy words.\n", "docs/guide/modules/src-b.proposal.md": "# B\n\nB is one.\n" });
+
+    const pending = scribe(repo.dir, "status");
+
+    expect(pending.stdout).toBe([
+      "Frozen: modules/src-b",
+      "Proposal to merge by hand: modules/src-b (docs/guide/modules/src-b.proposal.md)",
+      "",
+    ].join("\n"));
+    expect(pending.status).toBe(1);
+
+    repo.git("rm", "--quiet", "docs/guide/modules/src-b.proposal.md");
+    expect(scribe(repo.dir, "status").status).toBe(0);
+  });
+
   it("lists a Section whose file is gone and exits non-zero", async () => {
     const repo = await generated();
     repo.git("rm", "--quiet", "docs/guide/modules/src-b.md");

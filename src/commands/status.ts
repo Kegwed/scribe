@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { isFrozen } from "../manifest.ts";
-import { changedEvidence, isRemovedModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
+import { changedEvidence, isRemovedModuleSection, openTarget, proposalPath, readSection, sectionPath } from "../target.ts";
 
 export interface SectionStatus {
   section: string;
@@ -21,11 +23,13 @@ export interface SectionStatus {
 
 export interface StatusResult {
   sections: SectionStatus[];
+  /** Proposals `update` wrote for Frozen, Stale Sections, pending until a human merges and deletes them (ADR-0002). */
+  proposals: { section: string; file: string }[];
 }
 
 /**
  * Reports each Section in the manifest as Stale, Frozen, missing or removed,
- * and each Module without one as added, by hashing the Target repo as it is
+ * each Module without one as added, and each pending Proposal, by hashing the Target repo as it is
  * now. Calls no LLM and no network service.
  */
 export async function status(repoDir: string): Promise<StatusResult> {
@@ -51,5 +55,8 @@ export async function status(repoDir: string): Promise<StatusResult> {
     const frozen = isFrozen(await readSection(repoDir, file), undefined);
     return { section, file, added: !frozen, removed: false, missing: false, frozen, stale: false, changedEvidence: [] };
   }));
-  return { sections: [...recorded, ...unrecorded] };
+  const proposals = Object.keys(manifest.sections)
+    .map((section) => ({ section, file: proposalPath(config, section) }))
+    .filter(({ file }) => existsSync(join(repoDir, file)));
+  return { sections: [...recorded, ...unrecorded], proposals };
 }
