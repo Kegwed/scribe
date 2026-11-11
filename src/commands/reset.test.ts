@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { scriptedLlm } from "../test/recorded-llm.ts";
+import { stableSection } from "../test/sections.ts";
 import { adopt } from "./adopt.ts";
 import { generate } from "./generate.ts";
 import { reset } from "./reset.ts";
@@ -53,7 +54,7 @@ describe("reset", () => {
 
     const result = await reset(repo.dir, "modules/src-a", {}, { llm });
 
-    expect(read(repo.dir, A)).toBe("# A\n\nA returns two.[^1] K is three.[^2]\n\n[^1]: src/a/a.ts (a)\n[^2]: src/a/a.ts (k)\n");
+    expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "A returns two.[^1] K is three.[^2]", ["[^1]: src/a/a.ts (a)", "[^2]: src/a/a.ts (k)"]));
     expect(read(repo.dir, B)).toBe(b);
     expect(existsSync(join(repo.dir, A_PROPOSAL))).toBe(false);
     expect(result.clearedProposal).toBe(A_PROPOSAL);
@@ -71,7 +72,7 @@ describe("reset", () => {
 
     const result = await reset(repo.dir, "modules/src-a", {}, { llm: scriptedLlm(wrong, { "A returns three.": { confirmed: false, reason: "a returns 2" } }) });
 
-    expect(read(repo.dir, A)).toBe("# A\n\nK is three.[^1]\n\n[^1]: src/a/a.ts (k)\n");
+    expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "K is three.[^1]", ["[^1]: src/a/a.ts (k)"]));
     expect(result.droppedClaims).toEqual([{ section: "modules/src-a", text: "A returns three.", reason: "a returns 2" }]);
   });
 
@@ -83,7 +84,7 @@ describe("reset", () => {
 
     await reset(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused") });
 
-    expect(read(repo.dir, A)).toBe("# A\n\nA returns one.[^1] K is three.[^2]\n\n[^1]: src/a/a.ts (a)\n[^2]: src/a/a.ts (k)\n");
+    expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "A returns one.[^1] K is three.[^2]", ["[^1]: src/a/a.ts (a)", "[^2]: src/a/a.ts (k)"]));
     expect((await status(repo.dir)).unsupportedClaims).toEqual([]);
     expect(manifest(repo.dir).sections["modules/src-a"]).not.toHaveProperty("unsupportedClaims");
   });
@@ -94,7 +95,7 @@ describe("reset", () => {
 
     await reset(repo.dir, "modules/src-b", {}, { llm: scriptedLlm("unused") });
 
-    expect(read(repo.dir, B)).toBe("# B\n\nB is one.[^1]\n\n[^1]: src/b/b.ts (b)\n");
+    expect(read(repo.dir, B)).toBe(stableSection("B", "src/b", "B is one.[^1]", ["[^1]: src/b/b.ts (b)"]));
   });
 
   it("writes over a Section a human wrote for a Module Scribe never wrote one for", async () => {
@@ -107,7 +108,7 @@ describe("reset", () => {
 
     await reset(repo.dir, "modules/src-c", {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "C is one.", evidence: ["src/c/c.ts#c"] }] }] }) });
 
-    expect(read(repo.dir, "docs/guide/modules/src-c.md")).toBe("# C\n\nC is one.[^1]\n\n[^1]: src/c/c.ts (c)\n");
+    expect(read(repo.dir, "docs/guide/modules/src-c.md")).toBe(stableSection("C", "src/c", "C is one.[^1]", ["[^1]: src/c/c.ts (c)"]));
     expect((await status(repo.dir)).sections.find((s) => s.section === "modules/src-c")).toEqual(
       expect.objectContaining({ frozen: false, added: false }),
     );
