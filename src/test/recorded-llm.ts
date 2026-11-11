@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { claudeLlm, type Llm, type LlmRequest, MODELS, requestKey } from "../llm.ts";
+import { claudeLlm, type Llm, type LlmRequest, requestKey } from "../llm.ts";
 
 const CASSETTES = join(dirname(fileURLToPath(import.meta.url)), "cassettes");
 
@@ -63,8 +63,8 @@ export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown>
           setTimeout(() => waiting.splice(0).reverse().forEach((next, i) => setTimeout(next, i * 50)));
         }
       });
-      if (request.model === MODELS.write) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
-      if ("attachments" in ((request.schema.properties ?? {}) as object)) {
+      if (isSectionWrite(request)) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
+      if ("attachments" in ((request.schema.properties as object | undefined) ?? {})) {
         const claims = [...request.prompt.matchAll(/<claim index="(\d+)">\n(.*)\n<\/claim>/g)];
         return asResponseText({
           attachments: claims.map(([, index, text]) => ({ claim: Number(index), evidence: attachments[text!] ?? [] })),
@@ -74,6 +74,11 @@ export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown>
       return asResponseText(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);
     },
   };
+}
+
+/** Whether a request asks for a Section rather than a verdict; told apart by schema, since config can change either's model. */
+export function isSectionWrite(request: LlmRequest): boolean {
+  return "paragraphs" in ((request.schema.properties as object | undefined) ?? {});
 }
 
 function asResponseText(response: unknown): string {
