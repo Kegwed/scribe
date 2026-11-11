@@ -21,6 +21,27 @@ export interface SectionRecord {
   evidence: EvidenceRecord[];
   /** Hash of the content Scribe last wrote. */
   contentHash: string;
+  /** Where existing docs contradicted the code when Scribe last wrote the Section; absent if nowhere. */
+  drift?: DriftRecord[];
+}
+
+/** A contradiction between existing docs and the code, with the Evidence on each side; the code is treated as correct. */
+export interface DriftRecord {
+  description: string;
+  docs: EvidenceRecord[];
+  code: EvidenceRecord[];
+}
+
+/** A Drift as reported: the Section it was found for, and the ids of the Evidence on each side. */
+export interface DriftReport {
+  section: string;
+  description: string;
+  docs: string[];
+  code: string[];
+}
+
+export function driftReport(section: string, { description, docs, code }: DriftRecord): DriftReport {
+  return { section, description, docs: docs.map((e) => e.id), code: code.map((e) => e.id) };
 }
 
 export interface Manifest {

@@ -45,8 +45,9 @@ export function recordedLlm(name: string): RecordedLlm {
  * answers every write. The verifier answers from `verdicts`, keyed by a Claim's
  * text, and confirms any Claim not listed. Requests made together are answered
  * last first, so code that depends on the order answers arrive in fails here.
+ * A search for Drift is answered with `drift`, by default finding none.
  */
-export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown> = {}): RecordedLlm {
+export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown> = {}, drift: unknown = { drift: [] }): RecordedLlm {
   const calls: LlmRequest[] = [];
   const writes = Array.isArray(sections) ? sections : [sections];
   let written = 0;
@@ -62,6 +63,7 @@ export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown>
         }
       });
       if (request.model === MODELS.write) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
+      if ("drift" in ((request.schema.properties ?? {}) as object)) return asResponseText(drift);
       const claim = Object.keys(verdicts).find((key) => request.prompt.includes(key));
       return asResponseText(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);
     },

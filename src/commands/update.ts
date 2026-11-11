@@ -40,7 +40,7 @@ export async function update(
     const section = target.sectionIds.get(module)!;
     const record = target.manifest.sections[section];
     const existing = await readSection(repoDir, sectionPath(target.config, section));
-    const changed = record ? changedEvidence(record, target.symbols) : [];
+    const changed = record ? changedEvidence(record, target) : [];
     const fromScratch = !record || existing === undefined;
     if (!fromScratch && changed.length === 0) continue;
     if (isFrozen(existing, record)) {
