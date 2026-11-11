@@ -3,6 +3,7 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type CodeSymbol, typescriptAnalyser } from "./analyser.ts";
 import { CONFIG_FILE, type Config, loadConfig } from "./config.ts";
+import { CONVENTIONS, lintConfigEvidence } from "./conventions.ts";
 import { type DocEvidence, readDocs } from "./docs.ts";
 import { GETTING_STARTED, type SetupEvidence, setupEvidence } from "./getting-started.ts";
 import { type ChurnEvidence, churnEvidence } from "./git-history.ts";
@@ -24,6 +25,8 @@ export interface Target {
   docs: DocEvidence[];
   /** The scripts, CI steps and doc shell blocks the Getting started Section is written from. */
   setup: SetupEvidence[];
+  /** The lint and format config files the Conventions Section is written from, among other Evidence. */
+  lintConfig: FileEvidence[];
   manifest: Manifest;
 }
 
@@ -37,18 +40,19 @@ export async function openTarget(repoDir: string): Promise<Target> {
   const churn = churnEvidence(repoDir, modules);
   const setup = await setupEvidence(repoDir, config.guideDir);
   const docs = await readDocs(repoDir, config.guideDir);
+  const lintConfig = await lintConfigEvidence(repoDir, config.guideDir);
   const manifest = await loadManifest(repoDir);
-  return { config, modules, sectionIds, symbols, churn, setup, docs, manifest };
+  return { config, modules, sectionIds, symbols, churn, setup, docs, lintConfig, manifest };
 }
 
-/** Every Section the Guide should have: one per Module, then Getting started. */
+/** Every Section the Guide should have: one per Module, then Getting started, then Conventions. */
 export function guideSections({ sectionIds }: Target): string[] {
-  return [...sectionIds.values(), GETTING_STARTED];
+  return [...sectionIds.values(), GETTING_STARTED, CONVENTIONS];
 }
 
 /** Every piece of Evidence a Section could cite that Scribe can see change without the network, as it is now. */
-export function allEvidence({ symbols, churn, setup, docs }: Target): (FileEvidence | ChurnEvidence)[] {
-  return [...symbols, ...churn.values(), ...setup, ...docs];
+export function allEvidence({ symbols, churn, setup, docs, lintConfig }: Target): (FileEvidence | ChurnEvidence)[] {
+  return [...symbols, ...churn.values(), ...setup, ...docs, ...lintConfig];
 }
 
 /** Repo-relative path of a Section's file. */
