@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Config } from "../config.ts";
 import { isFrozen } from "../manifest.ts";
 import {
-  allEvidence,
+  localEvidence,
   changedEvidence,
   isRemovedModuleSection,
   openTarget,
@@ -51,7 +51,7 @@ export interface StatusResult {
 export async function status(repoDir: string): Promise<StatusResult> {
   const target = await openTarget(repoDir);
   const { config, manifest } = target;
-  const evidence = allEvidence(target);
+  const evidence = localEvidence(target);
 
   const recorded = await Promise.all(Object.entries(manifest.sections).map(async ([section, record]) => {
     const content = await readSection(repoDir, record.file);

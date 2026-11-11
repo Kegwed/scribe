@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { claudeLlm, type Llm, type LlmRequest, MODELS, requestKey } from "../llm.ts";
+import { claudeLlm, type Llm, type LlmRequest, requestKey } from "../llm.ts";
 
 const CASSETTES = join(dirname(fileURLToPath(import.meta.url)), "cassettes");
 
@@ -68,12 +68,17 @@ export function scriptedLlm(
         }
       });
       const title = request.prompt.match(/^Section: (.+)/)?.[1];
-      if (request.model === MODELS.write && title !== undefined) return asResponseText(topLevel[title] ?? { paragraphs: [] });
-      if (request.model === MODELS.write) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
+      if (isSectionWrite(request) && title !== undefined) return asResponseText(topLevel[title] ?? { paragraphs: [] });
+      if (isSectionWrite(request)) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
       const claim = Object.keys(verdicts).find((key) => request.prompt.includes(key));
       return asResponseText(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);
     },
   };
+}
+
+/** Whether a request asks for a Section rather than a verdict; told apart by schema, since config can change either's model. */
+export function isSectionWrite(request: LlmRequest): boolean {
+  return "paragraphs" in ((request.schema.properties as object | undefined) ?? {});
 }
 
 function asResponseText(response: unknown): string {

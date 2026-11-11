@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type CodeSymbol, type ModuleImport, typescriptAnalyser } from "./analyser.ts";
 import { CONFIG_FILE, type Config, loadConfig } from "./config.ts";
+import { type GitHubEvidence, isGitHubEvidence } from "./github.ts";
 import { contentHash } from "./hash.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
 import { detectModules, type Module } from "./modules.ts";
@@ -12,6 +13,7 @@ import { detectModules, type Module } from "./modules.ts";
  * cite directly instead of the Module Sections they are built from (ADR-0005).
  */
 export interface RepoEvidence {
+  /** `graph:<name>` for what Scribe derives from the code, `file:<path>` for a file's content. */
   id: string;
   /** How a citation names it. */
   label: string;
@@ -24,11 +26,15 @@ export interface RepoEvidence {
   endLine?: number;
 }
 
-/** One concrete item a Claim can cite: a code symbol, or Evidence about the repo as a whole. */
-export type Evidence = CodeSymbol | RepoEvidence;
+/** One concrete item a Claim can cite: a code symbol, GitHub discussion, or Evidence about the repo as a whole. */
+export type Evidence = CodeSymbol | GitHubEvidence | RepoEvidence;
 
 export function isCodeSymbol(evidence: Evidence): evidence is CodeSymbol {
   return "exportedAs" in evidence;
+}
+
+export function isDiscussion(evidence: Evidence): evidence is GitHubEvidence {
+  return "url" in evidence;
 }
 
 /** Sections written after the Module Sections, from them and the repo-wide Evidence (ADR-0005). */
@@ -71,8 +77,8 @@ export function sectionIdOf(target: Target, subject: Subject): string {
   return typeof subject === "string" ? subject : target.sectionIds.get(subject)!;
 }
 
-/** Every piece of Evidence a Section could cite, as the Target repo is now. */
-export function allEvidence(target: Target): Evidence[] {
+/** Every piece of local Evidence a Section could cite, as the Target repo is now. */
+export function localEvidence(target: Target): (CodeSymbol | RepoEvidence)[] {
   return [...target.symbols, ...target.repoEvidence.values()];
 }
 
@@ -88,10 +94,14 @@ export function proposalPath(config: Config, section: string): string {
 
 export const PROPOSAL_SUFFIX = ".proposal.md";
 
-/** Ids of the Evidence a Section cites that has changed or no longer exists; the Section is Stale if any. */
-export function changedEvidence(record: SectionRecord, evidence: Evidence[]): string[] {
+/**
+ * Ids of the Evidence a Section cites that has changed or no longer exists;
+ * the Section is Stale if any. GitHub Evidence never counts: `status` makes no
+ * network calls, so it can't see GitHub change.
+ */
+export function changedEvidence(record: SectionRecord, evidence: (CodeSymbol | RepoEvidence)[]): string[] {
   const hashes = new Map(evidence.map((e) => [e.id, e.hash]));
-  return record.evidence.filter(({ id, hash }) => hashes.get(id) !== hash).map(({ id }) => id);
+  return record.evidence.filter(({ id, hash }) => !isGitHubEvidence(id) && hashes.get(id) !== hash).map(({ id }) => id);
 }
 
 /** A Section file's content, or undefined if it doesn't exist. */
