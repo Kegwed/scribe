@@ -8,7 +8,7 @@ import { type DocEvidence, readDocs } from "./docs.ts";
 import { GETTING_STARTED, type SetupEvidence, setupEvidence } from "./getting-started.ts";
 import { type ChurnEvidence, churnEvidence } from "./git-history.ts";
 import type { FileEvidence, RepoEvidence } from "./evidence.ts";
-import { isGitHubEvidence } from "./github.ts";
+import { type FetchedDiscussions, type GitHub, gitHubEvidence, isGitHubEvidence } from "./github.ts";
 import { contentHash } from "./hash.ts";
 import { KEY_DECISIONS } from "./key-decisions.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
@@ -131,9 +131,20 @@ export function guideSection(target: Target, section: string): Module | undefine
   return [...target.sectionIds].find(([, id]) => id === section)?.[0];
 }
 
-/** Whether a Section cites GitHub Evidence: a Module's Section, whose Module is `module`, or a top-level Section that does. */
-export function drawsOnGitHub(section: string, module: Module | undefined): boolean {
-  return module !== undefined || TOP_LEVEL_SECTIONS[section]?.drawsOnGitHub === true;
+/**
+ * The GitHub Evidence one Section draws on, `module` being its Module if it
+ * is a Module's: none unless it is a Module's Section or a top-level Section
+ * that cites GitHub Evidence.
+ */
+export function sectionDiscussions(
+  repoDir: string,
+  section: string,
+  module: Module | undefined,
+  github: GitHub | undefined,
+  warnings: string[],
+): Promise<FetchedDiscussions> {
+  const draws = module !== undefined || TOP_LEVEL_SECTIONS[section]?.drawsOnGitHub === true;
+  return gitHubEvidence(repoDir, draws ? github : undefined, module ? [module] : [], warnings);
 }
 
 /** Deletes a Section's pending Proposal; returns its repo-relative path, or undefined if there was none. */

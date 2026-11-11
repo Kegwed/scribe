@@ -1,11 +1,8 @@
 import type { Adapters } from "../adapters.ts";
-import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR } from "../manifest.ts";
 import { emptyReport, sectionWriter } from "../section-writer.ts";
-import { clearProposal, drawsOnGitHub, openTarget, readSection, guideSection,sectionPath } from "../target.ts";
+import { clearProposal, guideSection, openTarget, readSection, sectionDiscussions, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
-
-export interface AdoptOptions {}
 
 export interface AdoptResult {
   /** The adopted Section's Claims for which the verifier found no Evidence; kept in the Section, never deleted. */
@@ -24,7 +21,6 @@ export interface AdoptResult {
 export async function adopt(
   repoDir: string,
   section: string,
-  _options: AdoptOptions,
   { llm, github }: Adapters,
 ): Promise<AdoptResult> {
   const target = await openTarget(repoDir);
@@ -35,7 +31,7 @@ export async function adopt(
   await gitIgnore(repoDir, CACHE_DIR);
 
   const report = emptyReport();
-  const { discussions, saveCache } = await gitHubEvidence(repoDir, drawsOnGitHub(section, module) ? github : undefined, module ? [module] : [], report.warnings);
+  const { discussions, saveCache } = await sectionDiscussions(repoDir, section, module, github, report.warnings);
   await saveCache();
   const unsupported = await sectionWriter(repoDir, target, llm, report, discussions).adopt(section, content);
   const clearedProposal = await clearProposal(repoDir, target.config, section);

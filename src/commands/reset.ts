@@ -1,11 +1,8 @@
 import type { Adapters } from "../adapters.ts";
-import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR } from "../manifest.ts";
 import { emptyReport, sectionWriter, type WriteReport } from "../section-writer.ts";
-import { clearProposal, drawsOnGitHub, openTarget, readSection, guideSection,sectionPath } from "../target.ts";
+import { clearProposal, guideSection, openTarget, readSection, sectionDiscussions, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
-
-export interface ResetOptions {}
 
 export interface ResetResult extends WriteReport {
   /** The Section's pending Proposal, deleted because the Section is regenerated. */
@@ -19,7 +16,6 @@ export interface ResetResult extends WriteReport {
 export async function reset(
   repoDir: string,
   section: string,
-  _options: ResetOptions,
   { llm, github }: Adapters,
 ): Promise<ResetResult> {
   const target = await openTarget(repoDir);
@@ -27,7 +23,7 @@ export async function reset(
   const existing = await readSection(repoDir, sectionPath(target.config, section));
   await gitIgnore(repoDir, CACHE_DIR);
   const result: ResetResult = emptyReport();
-  const { discussions, saveCache } = await gitHubEvidence(repoDir, drawsOnGitHub(section, module) ? github : undefined, module ? [module] : [], result.warnings);
+  const { discussions, saveCache } = await sectionDiscussions(repoDir, section, module, github, result.warnings);
   await saveCache();
 
   // An adopted record can carry Unsupported Claims, so it is replaced even if the text comes out the same.

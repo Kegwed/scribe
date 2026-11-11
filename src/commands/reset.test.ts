@@ -52,7 +52,7 @@ describe("reset", () => {
     expect(existsSync(join(repo.dir, A_PROPOSAL))).toBe(true);
     const llm = scriptedLlm(A_TWO);
 
-    const result = await reset(repo.dir, "modules/src-a", {}, { llm });
+    const result = await reset(repo.dir, "modules/src-a", { llm });
 
     expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "A returns two.[^1] K is three.[^2]", ["[^1]: src/a/a.ts (a)", "[^2]: src/a/a.ts (k)"]));
     expect(read(repo.dir, B)).toBe(b);
@@ -70,7 +70,7 @@ describe("reset", () => {
     repo.commit({ [A]: "# A\n\nMy words.\n", "src/a/a.ts": CHANGED_A });
     const wrong = { paragraphs: [{ claims: [{ text: "A returns three.", evidence: ["src/a/a.ts#a"] }, { text: "K is three.", evidence: ["src/a/a.ts#k"] }] }] };
 
-    const result = await reset(repo.dir, "modules/src-a", {}, { llm: scriptedLlm(wrong, { "A returns three.": { confirmed: false, reason: "a returns 2" } }) });
+    const result = await reset(repo.dir, "modules/src-a", { llm: scriptedLlm(wrong, { "A returns three.": { confirmed: false, reason: "a returns 2" } }) });
 
     expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "K is three.[^1]", ["[^1]: src/a/a.ts (k)"]));
     expect(result.droppedClaims).toEqual([{ section: "modules/src-a", text: "A returns three.", reason: "a returns 2" }]);
@@ -79,10 +79,10 @@ describe("reset", () => {
   it("clears an adopted Section's Unsupported Claims", async () => {
     const repo = await generated();
     repo.commit({ [A]: "# A\n\nA is fast.\n" });
-    await adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused") });
+    await adopt(repo.dir, "modules/src-a", { llm: scriptedLlm("unused") });
     expect((await status(repo.dir)).unsupportedClaims).toEqual([{ section: "modules/src-a", text: "A is fast." }]);
 
-    await reset(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused") });
+    await reset(repo.dir, "modules/src-a", { llm: scriptedLlm("unused") });
 
     expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "A returns one.[^1] K is three.[^2]", ["[^1]: src/a/a.ts (a)", "[^2]: src/a/a.ts (k)"]));
     expect((await status(repo.dir)).unsupportedClaims).toEqual([]);
@@ -93,7 +93,7 @@ describe("reset", () => {
     const repo = await generated();
     repo.git("rm", "--quiet", B);
 
-    await reset(repo.dir, "modules/src-b", {}, { llm: scriptedLlm("unused") });
+    await reset(repo.dir, "modules/src-b", { llm: scriptedLlm("unused") });
 
     expect(read(repo.dir, B)).toBe(stableSection("B", "src/b", "B is one.[^1]", ["[^1]: src/b/b.ts (b)"]));
   });
@@ -106,7 +106,7 @@ describe("reset", () => {
       "docs/guide/modules/src-c.md": "# C\n\nMine.\n",
     });
 
-    await reset(repo.dir, "modules/src-c", {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "C is one.", evidence: ["src/c/c.ts#c"] }] }] }) });
+    await reset(repo.dir, "modules/src-c", { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "C is one.", evidence: ["src/c/c.ts#c"] }] }] }) });
 
     expect(read(repo.dir, "docs/guide/modules/src-c.md")).toBe(stableSection("C", "src/c", "C is one.[^1]", ["[^1]: src/c/c.ts (c)"]));
     expect((await status(repo.dir)).sections.find((s) => s.section === "modules/src-c")).toEqual(
@@ -118,7 +118,7 @@ describe("reset", () => {
     const repo = await generated();
     const llm = scriptedLlm("unused");
 
-    await reset(repo.dir, "modules/src-a", {}, { llm });
+    await reset(repo.dir, "modules/src-a", { llm });
 
     expect(llm.calls).toEqual([]);
     expect(repo.git("status", "--porcelain")).toBe("");
@@ -129,7 +129,7 @@ describe("reset", () => {
     repo.commit({ "src/a/a.ts": CHANGED_A });
     const llm = scriptedLlm(A_TWO);
 
-    await reset(repo.dir, "modules/src-a", {}, { llm });
+    await reset(repo.dir, "modules/src-a", { llm });
 
     expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "A returns two.[^1] K is three.[^2]", ["[^1]: src/a/a.ts (a)", "[^2]: src/a/a.ts (k)"]));
     expect(llm.calls.some((call) => call.prompt.includes("<current-section>"))).toBe(false);
@@ -142,7 +142,7 @@ describe("reset", () => {
     repo.commit({ "docs/guide/overview.md": "# Overview\n\nMine.\n" });
 
     // Written from the same request generate made, so from the cache.
-    await reset(repo.dir, "overview", {}, { llm: scriptedLlm("unused") });
+    await reset(repo.dir, "overview", { llm: scriptedLlm("unused") });
 
     expect(read(repo.dir, "docs/guide/overview.md")).toBe(written);
     expect((await status(repo.dir)).sections.find((s) => s.section === "overview")).toEqual(expect.objectContaining({ frozen: false, stale: false }));
@@ -154,7 +154,7 @@ describe("reset", () => {
     repo.commit({ [`${A}/notes.txt`]: "A directory where the Section's file was.\n" });
     const llm = scriptedLlm("unused");
 
-    await expect(reset(repo.dir, "modules/src-a", {}, { llm })).rejects.toThrow(/can't read docs\/guide\/modules\/src-a\.md/);
+    await expect(reset(repo.dir, "modules/src-a", { llm })).rejects.toThrow(/can't read docs\/guide\/modules\/src-a\.md/);
     expect(llm.calls).toEqual([]);
     expect(repo.git("status", "--porcelain")).toBe("");
   });
@@ -163,7 +163,7 @@ describe("reset", () => {
     const repo = await generated();
     repo.commit({ "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }) });
 
-    await expect(reset(repo.dir, "modules/src-b", {}, { llm: scriptedLlm("unused") })).rejects.toThrow(/no Module has the Section modules\/src-b/);
+    await expect(reset(repo.dir, "modules/src-b", { llm: scriptedLlm("unused") })).rejects.toThrow(/no Module has the Section modules\/src-b/);
     expect(manifest(repo.dir).sections["modules/src-b"]).toBeDefined();
   });
 });

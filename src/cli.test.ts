@@ -178,7 +178,7 @@ describe("scribe status", () => {
   it("lists an adopted Section's Unsupported Claims but exits 0", async () => {
     const repo = await generated();
     repo.commit({ "docs/guide/modules/src-b.md": "# B\n\nB is fast.\n" });
-    await adopt(repo.dir, "modules/src-b", {}, { llm: scriptedLlm("unused") });
+    await adopt(repo.dir, "modules/src-b", { llm: scriptedLlm("unused") });
 
     const { status, stdout } = scribe(repo.dir, "status");
 
@@ -294,7 +294,7 @@ describe("scribe adopt and scribe reset", () => {
     await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] }) });
     repo.commit({ "docs/guide/modules/src-a.md": "# A\n\nA is fast.\n", "docs/guide/modules/src-a.proposal.md": "# A\n\nA is one.\n" });
     // Adopted once in-process to fill the git-ignored cache, then undone, so the CLI needs no LLM.
-    await adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused") });
+    await adopt(repo.dir, "modules/src-a", { llm: scriptedLlm("unused") });
     repo.git("checkout", "--quiet", "--", ".");
 
     const { status, stdout } = scribe(repo.dir, "adopt", "modules/src-a");
