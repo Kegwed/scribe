@@ -1,3 +1,6 @@
 [
-  { "name": "scribe", "url": "." }
+  { "name": "scribe", "url": "." },
+  { "name": "hono", "url": "https://github.com/honojs/hono.git", "ref": "v4.13.18" },
+  { "name": "trpc", "url": "https://github.com/trpc/trpc.git", "ref": "v11.28.0" },
+  { "name": "zod", "url": "https://github.com/colinhacks/zod.git", "ref": "v4.6.7" }
 ]
