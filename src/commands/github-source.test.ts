@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { connectGitHub } from "../github.ts";
 import { MODELS } from "../llm.ts";
 import { type CannedPullRequest, fakeGitHub } from "../test/fake-github.ts";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
@@ -69,6 +70,45 @@ describe("the GitHub Source", () => {
     expect(b).toContain("Merged into B");
     expect(b).not.toContain("Merged into A");
     expect(github.calls).not.toContain("pullRequest 2");
+  });
+
+  describe("when it is active", () => {
+    const token = () => "a-token";
+    const noToken = () => undefined;
+
+    it("is active when origin is on GitHub and a token is available", () => {
+      const repo = createFixtureRepo(TARGET);
+      repo.git("remote", "add", "origin", "git@github.com:acme/app.git");
+
+      expect(connectGitHub(repo.dir, token)).toBeDefined();
+    });
+
+    it("is skipped without a token", () => {
+      const repo = createFixtureRepo(TARGET);
+      repo.git("remote", "add", "origin", "https://github.com/acme/app.git");
+
+      expect(connectGitHub(repo.dir, noToken)).toBeUndefined();
+    });
+
+    it("is skipped when origin is not on GitHub, or there is none", () => {
+      const elsewhere = createFixtureRepo(TARGET);
+      elsewhere.git("remote", "add", "origin", "https://gitlab.com/acme/github.com.git");
+
+      expect(connectGitHub(elsewhere.dir, token)).toBeUndefined();
+      expect(connectGitHub(createFixtureRepo(TARGET).dir, token)).toBeUndefined();
+    });
+
+    it("leaves Scribe on its other Sources, with a warning, when GitHub fails", async () => {
+      const repo = createFixtureRepo(TARGET);
+      const github = fakeGitHub([]);
+      github.pullRequests = async () => { throw new Error("rate limited"); };
+      const llm = scriptedLlm({ paragraphs: [{ claims: [{ text: "One.", evidence: ["src/a/a.ts#a", "src/b/b.ts#b"] }] }] });
+
+      const result = await generate(repo.dir, {}, { llm, github });
+
+      expect(result.warnings).toEqual([expect.stringContaining("rate limited")]);
+      expect(read(repo.dir, A)).toContain("[^1]: src/a/a.ts (a)");
+    });
   });
 
   describe("keeping the Guide current", () => {

@@ -1,4 +1,5 @@
 import type { Adapters } from "../adapters.ts";
+import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR, isFrozen, saveManifest } from "../manifest.ts";
 import { emptyReport, sectionWriter, type WriteReport } from "../section-writer.ts";
 import { changedEvidence, isRemovedModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
@@ -21,12 +22,13 @@ export interface UpdateResult extends WriteReport {
 export async function update(
   repoDir: string,
   _options: UpdateOptions,
-  { llm }: Pick<Adapters, "llm">,
+  { llm, github }: Adapters,
 ): Promise<UpdateResult> {
   const target = await openTarget(repoDir);
   await gitIgnore(repoDir, CACHE_DIR);
   const result: UpdateResult = { ...emptyReport(), removed: [], proposals: [] };
-  const writer = sectionWriter(repoDir, target, llm, result);
+  const discussions = github && (await gitHubEvidence(repoDir, github, target.modules));
+  const writer = sectionWriter(repoDir, target, llm, result, discussions);
 
   const { sections } = target.manifest;
   for (const [section, { file }] of Object.entries(sections)) {
