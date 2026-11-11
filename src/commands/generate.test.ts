@@ -633,7 +633,7 @@ describe("generate", () => {
 
       const result = await generate(repo.dir, {}, { llm });
 
-      const searches = llm.calls.filter((call) => "drift" in (call.schema.properties as object));
+      const searches = llm.calls.filter((call) => call.kind === "drift");
       expect(searches).toHaveLength(1);
       expect(searches[0]!.prompt.length).toBeLessThanOrEqual(LIMIT);
       expect(searches[0]!.prompt).toContain('<doc id="README.md#a">');

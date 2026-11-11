@@ -242,7 +242,7 @@ describe("adopt", () => {
 
     const result = await adopt(repo.dir, "modules/src-a", { llm });
 
-    const [attach] = llm.calls.filter((call) => "attachments" in (call.schema.properties as object));
+    const [attach] = llm.calls.filter((call) => call.kind === "attach");
     expect(attach!.prompt.length).toBeLessThanOrEqual(600);
     expect(attach!.prompt).not.toContain("step59");
     expect(result).toEqual({
