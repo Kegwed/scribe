@@ -93,6 +93,7 @@ describe("update", () => {
 
     expect(writes(llm)).toHaveLength(2);
     expect(writes(llm)[1]!.prompt).toContain("a returns 2");
+    expect(writes(llm)[1]!.prompt).toContain("<current-section>\n# A\n\nA returns one.[^1] K is three.[^2]");
     expect(read(repo.dir, A)).toBe("# A\n\nK is three.[^1]\n\n[^1]: src/a/a.ts (k)\n");
     expect(result.droppedClaims).toEqual([{ section: "modules/src-a", text: "A returns three.", reason: "a returns 2" }]);
   });

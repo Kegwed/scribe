@@ -1,7 +1,7 @@
 import type { Adapters } from "../adapters.ts";
 import { CACHE_DIR, isFrozen, saveManifest } from "../manifest.ts";
 import { emptyReport, sectionWriter, type WriteReport } from "../section-writer.ts";
-import { changedEvidence, isModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
+import { changedEvidence, isRemovedModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
 
 export interface UpdateOptions {}
@@ -25,10 +25,9 @@ export async function update(
   const result: UpdateResult = { ...emptyReport(), removed: [] };
   const writer = sectionWriter(repoDir, target, llm, result);
 
-  const current = new Set(target.sectionIds.values());
   const { sections } = target.manifest;
   for (const [section, { file }] of Object.entries(sections)) {
-    if (!isModuleSection(section) || current.has(section)) continue;
+    if (!isRemovedModuleSection(target, section)) continue;
     result.removed.push({ section, file });
     delete sections[section];
   }
@@ -39,13 +38,13 @@ export async function update(
     const record = target.manifest.sections[section];
     const existing = await readSection(repoDir, sectionPath(target.config, section));
     const changed = record ? changedEvidence(record, target.symbols) : [];
-    const fresh = !record || existing === undefined;
-    if (!fresh && changed.length === 0) continue;
+    const fromScratch = !record || existing === undefined;
+    if (!fromScratch && changed.length === 0) continue;
     if (isFrozen(existing, record)) {
       result.frozen.push(section);
       continue;
     }
-    await writer.write(module, existing, fresh ? undefined : changed);
+    await writer.write(module, existing, fromScratch ? undefined : changed);
   }
   return result;
 }

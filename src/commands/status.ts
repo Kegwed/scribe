@@ -1,5 +1,5 @@
 import { isFrozen } from "../manifest.ts";
-import { changedEvidence, isModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
+import { changedEvidence, isRemovedModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
 
 export interface SectionStatus {
   section: string;
@@ -29,8 +29,8 @@ export interface StatusResult {
  * now. Calls no LLM and no network service.
  */
 export async function status(repoDir: string): Promise<StatusResult> {
-  const { config, sectionIds, symbols, manifest } = await openTarget(repoDir);
-  const current = new Set(sectionIds.values());
+  const target = await openTarget(repoDir);
+  const { config, sectionIds, symbols, manifest } = target;
 
   const recorded = await Promise.all(Object.entries(manifest.sections).map(async ([section, record]) => {
     const content = await readSection(repoDir, record.file);
@@ -39,14 +39,14 @@ export async function status(repoDir: string): Promise<StatusResult> {
       section,
       file: record.file,
       added: false,
-      removed: isModuleSection(section) && !current.has(section),
+      removed: isRemovedModuleSection(target, section),
       missing: content === undefined,
       frozen: isFrozen(content, record),
       stale: changed.length > 0,
       changedEvidence: changed,
     };
   }));
-  const unrecorded = await Promise.all([...current].filter((section) => !manifest.sections[section]).map(async (section) => {
+  const unrecorded = await Promise.all([...sectionIds.values()].filter((section) => !manifest.sections[section]).map(async (section) => {
     const file = sectionPath(config, section);
     const frozen = isFrozen(await readSection(repoDir, file), undefined);
     return { section, file, added: !frozen, removed: false, missing: false, frozen, stale: false, changedEvidence: [] };

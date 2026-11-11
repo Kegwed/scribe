@@ -46,9 +46,9 @@ export async function readSection(repoDir: string, path: string): Promise<string
 
 const MODULE_SECTIONS = "modules/";
 
-/** Whether a Section id names a Module's Section rather than a top-level one. */
-export function isModuleSection(section: string): boolean {
-  return section.startsWith(MODULE_SECTIONS);
+/** Whether a recorded Section belongs to a Module that no longer exists; top-level Sections never do. */
+export function isRemovedModuleSection({ sectionIds }: Target, section: string): boolean {
+  return section.startsWith(MODULE_SECTIONS) && ![...sectionIds.values()].includes(section);
 }
 
 function uniqueSectionIds(modules: Module[]): Map<Module, string> {

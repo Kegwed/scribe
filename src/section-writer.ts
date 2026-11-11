@@ -50,7 +50,7 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
       let written: SectionResponse = evidence.size === 0 ? { paragraphs: [] } : await writeSection(firstPrompt);
       let failures = await verifySection(llm, repoDir, written, evidence);
       if (failures.size > 0) {
-        written = await writeSection(repairPrompt(module, [...evidence.values()], written, failures));
+        written = await writeSection(repairPrompt(firstPrompt, written, failures));
         failures = await verifySection(llm, repoDir, written, evidence);
       }
       const { paragraphs } = written;
@@ -255,10 +255,11 @@ function revisionPrompt(module: Module, symbols: CodeSymbol[], current: string, 
   ].join("\n\n");
 }
 
-function repairPrompt(module: Module, symbols: CodeSymbol[], failed: SectionResponse, failures: Map<Claim, string>): string {
+/** `firstPrompt` is the one that produced `failed`, so a revision's repair still sees the Section's current text. */
+function repairPrompt(firstPrompt: string, failed: SectionResponse, failures: Map<Claim, string>): string {
   const feedback = [...failures].map(([claim, reason]) => `<failure>\n<claim>${claim.text}</claim>\n<reason>${reason}</reason>\n</failure>`);
   return [
-    sectionPrompt(module, symbols),
+    firstPrompt,
     `<section>\n${JSON.stringify(failed)}\n</section>`,
     ...feedback,
     "The Section above failed verification on the listed Claims. Write the Section again: keep every other Claim as it is, and correct each listed Claim so the symbols it cites back it. Do not leave out any Claim: one that can't be corrected is removed and reported after this.",
