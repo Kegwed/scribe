@@ -164,7 +164,8 @@ function docEvidence(file: string, content: string): SetupEvidence[] {
     if (commands.length === 0) continue;
     const text = commands.join("\n");
     blocks.push({
-      id: `${file}#block-${blocks.length + 1}`,
+      // A heading's slug never holds a dot, so this can't be the id of one of the doc's passages.
+      id: `${file}#block.${blocks.length + 1}`,
       name: commands[0]!,
       file,
       text,
