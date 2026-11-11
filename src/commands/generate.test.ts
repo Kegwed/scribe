@@ -309,7 +309,10 @@ describe("generate", () => {
 
     expect(read(repo.dir, "docs/guide/modules/src-auth.md")).toBe("# My words\n");
     expect(result.frozen).toEqual(["modules/src-auth"]);
-    expect(JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections).toEqual(before);
+    // Overview and Architecture are built from the Module Sections as they are on disk, the human's words included.
+    const { overview: _o, architecture: _a, ...after } = JSON.parse(read(repo.dir, ".scribe/manifest.json")).sections;
+    const { overview: _ob, architecture: _ab, ...unchanged } = before;
+    expect(after).toEqual(unchanged);
   });
 
   it("treats an existing file Scribe never wrote as Frozen", async () => {
