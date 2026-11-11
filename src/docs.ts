@@ -4,27 +4,21 @@ import { join } from "node:path";
 import type { CodeSymbol } from "./analyser.ts";
 import { contentHash } from "./hash.ts";
 import type { Module } from "./modules.ts";
+import type { FileEvidence } from "./section-writer.ts";
 
 /**
  * One heading's part of an existing doc in the Target repo, such as the README
  * or an ADR: the unit doc Evidence is anchored to and hashed by. Doc comments
  * need no entry here; they are part of the code symbol they document.
  */
-export interface DocEvidence {
+export interface DocEvidence extends FileEvidence {
   kind: "doc";
   /** `<file>#<heading slug>`, or just `<file>` for the text before its first heading. */
   id: string;
   /** The heading, or the file's name for the text before its first heading. */
   name: string;
-  /** Repo-relative, forward-slashed path of the doc. */
-  file: string;
   /** The heading and the text under it up to the next heading, line endings normalised. */
   text: string;
-  /** Hash of `text`. */
-  hash: string;
-  /** 1-based lines the passage spans in the file as it is now. */
-  startLine: number;
-  endLine: number;
 }
 
 const DOC_FILE = /\.mdx?$/i;

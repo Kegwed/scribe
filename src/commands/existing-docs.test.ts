@@ -30,6 +30,11 @@ function read(dir: string, path: string): string {
   return readFileSync(join(dir, path), "utf8");
 }
 
+/** The Auth Module's Section as `status` reports it. */
+async function authStatus(dir: string) {
+  return (await status(dir)).sections.find((s) => s.section === "modules/src-auth");
+}
+
 describe("existing docs as a Source", () => {
   it("lets a Section cite a heading of the README as Evidence", async () => {
     const repo = createFixtureRepo(TARGET);
@@ -62,13 +67,11 @@ describe("existing docs as a Source", () => {
       await generate(repo.dir, {}, { llm: scriptedLlm(CITING) });
       repo.commit({ "README.md": README.replace("to start a session", "to begin a session") });
 
-      expect((await status(repo.dir)).sections).toEqual([
-        expect.objectContaining({ section: "modules/src-auth", stale: true, changedEvidence: ["README.md#sessions"] }),
-      ]);
+      expect(await authStatus(repo.dir)).toMatchObject({ stale: true, changedEvidence: ["README.md#sessions"] });
       const llm = scriptedLlm(CITING);
       await update(repo.dir, {}, { llm });
       expect(llm.calls.some((c) => c.prompt.includes("to begin a session"))).toBe(true);
-      expect((await status(repo.dir)).sections[0]).toMatchObject({ stale: false });
+      expect(await authStatus(repo.dir)).toMatchObject({ stale: false });
     });
 
     it("doesn't make a Section Stale for edits to doc passages it doesn't cite", async () => {
@@ -76,7 +79,7 @@ describe("existing docs as a Source", () => {
       await generate(repo.dir, {}, { llm: scriptedLlm(CITING) });
       repo.commit({ "README.md": README.replace("An app.", "An app for sessions.") });
 
-      expect((await status(repo.dir)).sections[0]).toMatchObject({ stale: false });
+      expect(await authStatus(repo.dir)).toMatchObject({ stale: false });
     });
   });
 
@@ -137,11 +140,12 @@ describe("existing docs as a Source", () => {
       await generate(repo.dir, {}, { llm: llm() });
       repo.commit({ "README.md": README });
 
-      expect((await status(repo.dir)).sections[0]).toMatchObject({ stale: true, changedEvidence: ["README.md#sessions"] });
+      expect(await authStatus(repo.dir)).toMatchObject({ stale: true, changedEvidence: ["README.md#sessions"] });
       const result = await update(repo.dir, {}, { llm: llm([]) });
 
       expect(result.drift).toEqual([]);
-      expect(await status(repo.dir)).toMatchObject({ drift: [], sections: [expect.objectContaining({ stale: false })] });
+      expect((await status(repo.dir)).drift).toEqual([]);
+      expect(await authStatus(repo.dir)).toMatchObject({ stale: false });
     });
 
     it("keeps reporting the Drift of a Section that isn't rewritten", async () => {

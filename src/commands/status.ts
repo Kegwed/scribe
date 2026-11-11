@@ -3,7 +3,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
 import { type DriftReport, isFrozen, recordedDrift } from "../manifest.ts";
-import { changedEvidence, isRemovedModuleSection, openTarget, PROPOSAL_SUFFIX, proposalPath, readSection, sectionPath } from "../target.ts";
+import { allEvidence, changedEvidence, guideSections, isRemovedModuleSection, openTarget, PROPOSAL_SUFFIX, proposalPath, readSection, sectionPath } from "../target.ts";
 
 export interface SectionStatus {
   section: string;
@@ -38,11 +38,12 @@ export interface StatusResult {
  */
 export async function status(repoDir: string): Promise<StatusResult> {
   const target = await openTarget(repoDir);
-  const { config, sectionIds, manifest } = target;
+  const { config, manifest } = target;
+  const evidence = allEvidence(target);
 
   const recorded = await Promise.all(Object.entries(manifest.sections).map(async ([section, record]) => {
     const content = await readSection(repoDir, record.file);
-    const changed = changedEvidence(record, target);
+    const changed = changedEvidence(record, evidence);
     return {
       section,
       file: record.file,
@@ -54,7 +55,7 @@ export async function status(repoDir: string): Promise<StatusResult> {
       changedEvidence: changed,
     };
   }));
-  const unrecorded = await Promise.all([...sectionIds.values()].filter((section) => !manifest.sections[section]).map(async (section) => {
+  const unrecorded = await Promise.all(guideSections(target).filter((section) => !manifest.sections[section]).map(async (section) => {
     const file = sectionPath(config, section);
     const frozen = isFrozen(await readSection(repoDir, file), undefined);
     return { section, file, added: !frozen, removed: false, missing: false, frozen, stale: false, changedEvidence: [] };
