@@ -22,7 +22,7 @@ export async function generate(
   const target = await openTarget(repoDir);
   await gitIgnore(repoDir, CACHE_DIR);
   const result = emptyReport();
-  const discussions = github && (await gitHubEvidence(github, target.modules));
+  const discussions = github && (await gitHubEvidence(repoDir, github, target.modules));
   const writer = sectionWriter(repoDir, target, llm, result, discussions);
 
   for (const module of target.modules) {

@@ -1,4 +1,9 @@
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { contentHash } from "./hash.ts";
+import { CACHE_DIR } from "./manifest.ts";
 import { type Module, moduleOf } from "./modules.ts";
 
 /** One item of GitHub discussion a Claim can cite: a pull request's description, a review comment, or a linked issue. */
@@ -29,8 +34,9 @@ const RANK_HALF_LIFE_DAYS = 365;
  * merged pull requests that touched its files, and the issues they link to,
  * from the highest-ranked pull requests only.
  */
-export async function gitHubEvidence(github: GitHub, modules: Module[]): Promise<Map<string, GitHubEvidence[]>> {
-  const merged = (await github.pullRequests()).filter((pr) => pr.mergedAt !== null);
+export async function gitHubEvidence(repoDir: string, github: GitHub, modules: Module[]): Promise<Map<string, GitHubEvidence[]>> {
+  const cached = cachedGitHub(repoDir, github);
+  const merged = (await cached.pullRequests()).filter((pr) => pr.mergedAt !== null);
   const rank = ranking(merged);
   const chosen = new Map<string, PullRequestSummary[]>(modules.map((m) => [m.path, []]));
   for (const summary of merged) {
@@ -45,11 +51,63 @@ export async function gitHubEvidence(github: GitHub, modules: Module[]): Promise
   for (const [path, pulls] of chosen) {
     const top = pulls.sort((a, b) => rank(b) - rank(a) || b.number - a.number).slice(0, PULL_REQUESTS_PER_MODULE);
     for (const { number } of top) {
-      if (!details.has(number)) details.set(number, github.pullRequest(number).then(discussionOf));
+      if (!details.has(number)) details.set(number, cached.pullRequest(number).then(discussionOf));
     }
     evidence.set(path, (await Promise.all(top.map(({ number }) => details.get(number)!))).flat());
   }
   return evidence;
+}
+
+/**
+ * `github` answering from the Target repo's cache where it can. The list is
+ * cached per commit: a pull request merged since was merged upstream of the
+ * code being documented. A pull request is cached until it is next updated.
+ * Responses are cached only once validated, so a bad one is never replayed.
+ */
+function cachedGitHub(repoDir: string, github: GitHub): GitHub {
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repoDir, encoding: "utf8" });
+  const sha = head.status === 0 ? head.stdout.trim() : undefined;
+  const updatedAt = new Map<number, string>();
+
+  async function cached<T>(name: string | undefined, fetch: () => Promise<T>, valid: (value: unknown) => boolean): Promise<T> {
+    const file = name && join(repoDir, CACHE_DIR, "github", `${name}.json`);
+    if (file && existsSync(file)) return JSON.parse(await readFile(file, "utf8"));
+    const value = await fetch();
+    if (!valid(value)) throw new Error(`malformed GitHub response: ${JSON.stringify(value)}`);
+    if (file) {
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, JSON.stringify(value));
+    }
+    return value;
+  }
+
+  return {
+    async pullRequests() {
+      const list = await cached(sha && `pulls-${sha}`, () => github.pullRequests(), isSummaryList);
+      for (const pr of list) updatedAt.set(pr.number, pr.updatedAt);
+      return list;
+    },
+    pullRequest(number) {
+      const version = updatedAt.get(number);
+      const name = version === undefined ? undefined : `pull-${number}-${contentHash(version).slice(0, 16)}`;
+      return cached(name, () => github.pullRequest(number), isPullRequest);
+    },
+  };
+}
+
+const isString = (v: unknown) => typeof v === "string";
+const isNumber = (v: unknown) => typeof v === "number";
+
+function isSummaryList(value: unknown): boolean {
+  return Array.isArray(value) && value.every((pr) =>
+    isNumber(pr?.number) && (pr.mergedAt === null || isString(pr.mergedAt)) && isString(pr.updatedAt) &&
+    Array.isArray(pr.files) && pr.files.every(isString) && isNumber(pr.reviewComments));
+}
+
+function isPullRequest(pr: any): boolean {
+  return isNumber(pr?.number) && isString(pr.title) && isString(pr.body) && isString(pr.url) &&
+    Array.isArray(pr.comments) && pr.comments.every((c: any) => isNumber(c?.id) && isString(c.body) && isString(c.url)) &&
+    Array.isArray(pr.linkedIssues) && pr.linkedIssues.every((i: any) => isNumber(i?.number) && isString(i.title) && isString(i.body) && isString(i.url));
 }
 
 /**

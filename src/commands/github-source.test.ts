@@ -6,6 +6,8 @@ import { type CannedPullRequest, fakeGitHub } from "../test/fake-github.ts";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { generate } from "./generate.ts";
+import { status } from "./status.ts";
+import { update } from "./update.ts";
 
 const TARGET: Files = {
   "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }, { name: "B", path: "src/b" }] }),
@@ -67,6 +69,37 @@ describe("the GitHub Source", () => {
     expect(b).toContain("Merged into B");
     expect(b).not.toContain("Merged into A");
     expect(github.calls).not.toContain("pullRequest 2");
+  });
+
+  describe("keeping the Guide current", () => {
+    const PULLS: CannedPullRequest[] = [{ number: 12, files: ["src/a/a.ts"], comments: ["Keep a constant: callers cache it."] }];
+    const CITING = [
+      { paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }, { text: "Callers cache A.", evidence: ["github:pr/12/comment/1201"] }] }] },
+      { paragraphs: [{ claims: [{ text: "B is one.", evidence: ["src/b/b.ts#b"] }] }] },
+    ];
+
+    it("doesn't count cited GitHub Evidence as changed, so status reports the Guide current", async () => {
+      const repo = createFixtureRepo(TARGET);
+      await generate(repo.dir, {}, { llm: scriptedLlm(CITING), github: fakeGitHub(PULLS) });
+
+      const { sections } = await status(repo.dir);
+
+      expect(sections.filter((s) => s.stale)).toEqual([]);
+    });
+
+    it("keeps citing GitHub Evidence when update revises a Stale Section", async () => {
+      const repo = createFixtureRepo(TARGET);
+      await generate(repo.dir, {}, { llm: scriptedLlm(CITING), github: fakeGitHub(PULLS) });
+      repo.commit({ "src/a/a.ts": "export const a = 2;\n" });
+
+      const llm = scriptedLlm({
+        paragraphs: [{ claims: [{ text: "A is two.", evidence: ["src/a/a.ts#a"] }, { text: "Callers cache A.", evidence: ["github:pr/12/comment/1201"] }] }],
+      });
+      await update(repo.dir, {}, { llm, github: fakeGitHub(PULLS) });
+
+      expect(writePrompts(llm)[0]).toContain("Keep a constant: callers cache it.");
+      expect(read(repo.dir, A)).toContain("[^2]: [PR #12, review comment](https://github.com/acme/app/pull/12#discussion_r1201)");
+    });
   });
 
   describe("caching", () => {
