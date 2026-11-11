@@ -12,6 +12,32 @@ export const MODELS = {
   verify: "claude-haiku-5-5",
 } as const;
 
+/** US dollars per million tokens, from Anthropic's published API prices. */
+const PRICES: Record<string, { input: number; output: number }> = {
+  "claude-sonnet-5-5": { input: 2, output: 10 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5 },
+};
+
+/**
+ * What a request is expected to cost before it is sent: its input tokens
+ * approximated from its length, plus `outputTokens` the caller expects back.
+ * Approximate by design, since counting exactly would itself call the API.
+ */
+export function estimateCost(request: LlmRequest, outputTokens: number): { tokens: number; dollars: number } {
+  const price = PRICES[request.model];
+  if (!price) throw new Error(`no price known for ${request.model}`);
+  const input = approximateTokens(request.system + request.prompt + JSON.stringify(request.schema));
+  return {
+    tokens: input + outputTokens,
+    dollars: (input * price.input + outputTokens * price.output) / 1_000_000,
+  };
+}
+
+/** A rough token count: about four characters per token for English prose and code. */
+export function approximateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
 export interface LlmRequest {
   model: string;
   system: string;
@@ -56,6 +82,15 @@ export function requestKey(request: LlmRequest): string {
   return contentHash(JSON.stringify([request.model, request.system, request.prompt, request.schema]));
 }
 
+function cacheFile(repoDir: string, request: LlmRequest): string {
+  return join(repoDir, CACHE_DIR, `${requestKey(request)}.txt`);
+}
+
+/** Whether the Target repo's cache already answers `request`, so asking costs nothing. */
+export function isCached(repoDir: string, request: LlmRequest): boolean {
+  return existsSync(cacheFile(repoDir, request));
+}
+
 /**
  * Answers `request` from the Target repo's cache, or from `llm` on a miss. A
  * response is cached only once `parse` accepts it, so a bad one is never replayed.
@@ -66,7 +101,7 @@ export async function completeCached<T>(
   request: LlmRequest,
   parse: (response: string) => T,
 ): Promise<T> {
-  const file = join(repoDir, CACHE_DIR, `${requestKey(request)}.txt`);
+  const file = cacheFile(repoDir, request);
   if (existsSync(file)) return parse(await readFile(file, "utf8"));
 
   const response = await llm.complete(request);
