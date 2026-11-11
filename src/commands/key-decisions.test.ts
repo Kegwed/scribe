@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PULL_REQUESTS_FOR_DECISIONS } from "../github.ts";
@@ -44,10 +44,8 @@ function writePrompts(llm: RecordedLlm): string[] {
   return llm.calls.filter((call) => call.model === MODELS.write && !call.prompt.startsWith("Section: ")).map((call) => call.prompt);
 }
 
-const RECORDED = process.env.SCRIBE_RECORD !== undefined || existsSync(new URL("../test/cassettes/key-decisions.json", import.meta.url));
-
 describe("Key decisions against recorded responses", () => {
-  it.skipIf(!RECORDED)("lists decisions from an ADR and a pull request thread, every Claim citing one and verified", async () => {
+  it("lists decisions from an ADR and a pull request thread, every Claim citing one and verified", async () => {
     const repo = createFixtureRepo(TARGET);
     const github = fakeGitHub([{
       number: 12,

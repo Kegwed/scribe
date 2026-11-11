@@ -47,8 +47,7 @@ function conventionsLlm(...claims: [string, string[]][]) {
 }
 
 describe("generate: Conventions", () => {
-  // Skipped until `npm run record` records cassettes/conventions.json against Claude.
-  it.skip("writes Conventions with Claude, each Claim citing lint config, code or CONTRIBUTING, verified", async () => {
+  it("writes Conventions with Claude, each Claim citing lint config, code or CONTRIBUTING, verified", async () => {
     const repo = createFixtureRepo(TARGET);
     const llm = recordedLlm("conventions");
 
