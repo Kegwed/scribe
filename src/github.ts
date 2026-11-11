@@ -166,12 +166,33 @@ function ranking(merged: PullRequestSummary[]): (pr: PullRequestSummary) => numb
 }
 
 function discussionOf(pr: PullRequest): GitHubEvidence[] {
-  const item = (id: string, label: string, url: string, text: string) => ({ id: `${GITHUB_EVIDENCE}${id}`, label, url, text, hash: contentHash(text) });
+  const item = (id: string, label: string, url: string, raw: string) => {
+    const text = withoutPeople(raw);
+    return { id: `${GITHUB_EVIDENCE}${id}`, label, url, text, hash: contentHash(text) };
+  };
   return [
     item(`pr/${pr.number}`, `PR #${pr.number}`, pr.url, `${pr.title}\n\n${pr.body}`.trim()),
     ...pr.comments.map((c) => item(`pr/${pr.number}/comment/${c.id}`, `PR #${pr.number}, review comment`, c.url, c.body)),
     ...pr.linkedIssues.map((i) => item(`issue/${i.number}`, `Issue #${i.number}`, i.url, `${i.title}\n\n${i.body}`.trim())),
   ];
+}
+
+/**
+ * GitHub text with the people it names taken out before any prompt sees it,
+ * so a Section can't name them whatever the model does: @mentions read
+ * "someone", email addresses "an email address", and trailer lines such as
+ * Co-authored-by are dropped. Code spans and blocks are kept as they are, and
+ * so is an @ followed by a slash, which names a package scope or a team.
+ */
+function withoutPeople(text: string): string {
+  return text
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/)
+    .map((part, i) => i % 2 === 1 ? part : part
+      .replace(/^[ \t]*(?:Co-authored-by|Signed-off-by|Reviewed-by|Reported-by|Acked-by|Tested-by):.*(?:\r?\n|$)/gim, "")
+      .replace(/[\w.+-]+@[A-Za-z\d-]+(?:\.[A-Za-z\d-]+)+/g, "an email address")
+      .replace(/(?<![\w@./`])@[A-Za-z\d](?:[A-Za-z\d]|-(?=[A-Za-z\d])){0,38}(?![\w/-])/g, "someone"))
+    .join("")
+    .trim();
 }
 
 /** A pull request as listed, with what Scribe needs to choose among them. */
