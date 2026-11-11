@@ -16,8 +16,24 @@ import { detectModules, type Module } from "./modules.ts";
 
 export const OVERVIEW = "overview";
 export const ARCHITECTURE = "architecture";
-/** Written after the Module Sections, from them and the repo-wide Evidence (ADR-0005). */
-export const BOTTOM_UP_SECTIONS = [OVERVIEW, ARCHITECTURE];
+
+/**
+ * The Guide's top-level Sections by id, in the order they are written after
+ * the Module Sections, and whether each cites GitHub Evidence. Overview and
+ * Architecture come last: they are built from the Module Sections (ADR-0005).
+ */
+const TOP_LEVEL_SECTIONS: Record<string, { drawsOnGitHub: boolean }> = {
+  [GETTING_STARTED]: { drawsOnGitHub: false },
+  [CONVENTIONS]: { drawsOnGitHub: false },
+  [KEY_DECISIONS]: { drawsOnGitHub: true },
+  [OVERVIEW]: { drawsOnGitHub: false },
+  [ARCHITECTURE]: { drawsOnGitHub: false },
+};
+
+/** Whether a Section is a top-level one rather than a Module's. */
+export function isTopLevelSection(section: string): boolean {
+  return Object.hasOwn(TOP_LEVEL_SECTIONS, section);
+}
 
 /** A Target repo as every command that reads its Guide sees it. */
 export interface Target {
@@ -61,7 +77,7 @@ export async function openTarget(repoDir: string): Promise<Target> {
  * Architecture, which are built from the Module Sections (ADR-0005).
  */
 export function guideSections({ sectionIds }: Target): string[] {
-  return [...sectionIds.values(), GETTING_STARTED, CONVENTIONS, KEY_DECISIONS, ...BOTTOM_UP_SECTIONS];
+  return [...sectionIds.values(), ...Object.keys(TOP_LEVEL_SECTIONS)];
 }
 
 /** Every piece of Evidence a Section could cite that Scribe can see change without the network, as it is now. */
@@ -115,9 +131,9 @@ export function guideSection(target: Target, section: string): Module | undefine
   return [...target.sectionIds].find(([, id]) => id === section)?.[0];
 }
 
-/** Whether a Section cites GitHub Evidence: a Module's Section, whose Module is `module`, or Key decisions. */
+/** Whether a Section cites GitHub Evidence: a Module's Section, whose Module is `module`, or a top-level Section that does. */
 export function drawsOnGitHub(section: string, module: Module | undefined): boolean {
-  return module !== undefined || section === KEY_DECISIONS;
+  return module !== undefined || TOP_LEVEL_SECTIONS[section]?.drawsOnGitHub === true;
 }
 
 /** Deletes a Section's pending Proposal; returns its repo-relative path, or undefined if there was none. */
@@ -130,14 +146,9 @@ export async function clearProposal(repoDir: string, config: Config, section: st
 
 const MODULE_SECTIONS = "modules/";
 
-/** Whether a Section is a Module's, rather than a top-level one. */
-export function isModuleSection(section: string): boolean {
-  return section.startsWith(MODULE_SECTIONS);
-}
-
 /** Whether a recorded Section belongs to a Module that no longer exists; top-level Sections never do. */
 export function isRemovedModuleSection({ sectionIds }: Target, section: string): boolean {
-  return isModuleSection(section) && ![...sectionIds.values()].includes(section);
+  return !isTopLevelSection(section) && ![...sectionIds.values()].includes(section);
 }
 
 function uniqueSectionIds(modules: Module[]): Map<Module, string> {

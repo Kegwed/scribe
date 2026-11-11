@@ -190,84 +190,81 @@ export function sectionWriter(
     });
   }
 
-  function subject(section: string): Subject {
-    if (isBottomUp(section)) {
-      const { title, system, evidence: ids } = BOTTOM_UP[section]!;
-      const items = ids.flatMap((id) => repoEvidence.get(id) ?? []);
-      return {
-        title,
-        items,
-        evidence: new Map(items.map((e) => [e.id, e])),
-        // Repo-wide Evidence is never code, so it is never summarised.
-        system: () => system,
-        verifySystem: () => VERIFY_REPO_SYSTEM,
-        frame: (rendered) => bottomUpPrompt(title, moduleSections(), rendered),
-        render: renderRepo,
-        item: "Evidence item",
-        uncited: `cites no Evidence ${title} draws on directly`,
-        writes: notDocsAlone,
-      };
-    }
-    if (section === GETTING_STARTED) {
-      return {
-        title: "Getting started",
-        items: setup,
-        evidence: new Map(setup.map((e) => [e.id, e])),
-        // Setup Evidence is never code, so it is never summarised.
-        system: () => GETTING_STARTED_SYSTEM,
-        verifySystem: () => VERIFY_SETUP_SYSTEM,
-        frame: (rendered) => rendered.join("\n\n"),
-        render: renderSetup,
-        item: "piece of Evidence",
-        uncited: "cites no script, CI step or doc",
-        writes: notDocsAlone,
-        check({ text }) {
-          const unmatched = unmatchedCommands(text, setup);
-          if (unmatched.length === 0) return undefined;
-          return `names ${unmatched.map((c) => `\`${c}\``).join(", ")}, which no package.json script, CI workflow step or existing doc runs`;
-        },
-      };
-    }
-    if (section === CONVENTIONS) {
-      const items = conventionsEvidence(target);
-      return {
-        title: "Conventions",
-        items,
-        evidence: new Map(items.map((e) => [e.id, e])),
-        writes: hasConventions,
-        system: (_, summarised) => (summarised ? `${CONVENTIONS_SYSTEM}\n\n${SUMMARISED_NOTE}` : CONVENTIONS_SYSTEM),
-        verifySystem: () => VERIFY_CONVENTIONS_SYSTEM,
-        frame: (rendered) => rendered.join("\n\n"),
-        render: renderModuleEvidence,
-        item: "piece of Evidence",
-        uncited: "cites no lint or format config, code or CONTRIBUTING passage",
-      };
-    }
-    if (section === KEY_DECISIONS) {
+  /** What a Section is written from, but its Evidence by id; a prompt that writes it afresh joins its rendered Evidence unless it says otherwise. */
+  type SubjectSpec = Omit<Subject, "evidence" | "frame"> & Partial<Pick<Subject, "frame">>;
+
+  function bottomUpSubject(section: string): SubjectSpec {
+    const { title, system, evidence: ids } = BOTTOM_UP[section]!;
+    return {
+      title,
+      items: ids.flatMap((id) => repoEvidence.get(id) ?? []),
+      // Repo-wide Evidence is never code, so it is never summarised.
+      system: () => system,
+      verifySystem: () => VERIFY_REPO_SYSTEM,
+      frame: (rendered) => bottomUpPrompt(title, moduleSections(), rendered),
+      render: renderRepo,
+      item: "Evidence item",
+      uncited: `cites no Evidence ${title} draws on directly`,
+      writes: notDocsAlone,
+    };
+  }
+
+  /** Each top-level Section's Subject, by Section id; any other Section is a Module's. */
+  const topLevel: Record<string, () => SubjectSpec> = {
+    [GETTING_STARTED]: () => ({
+      title: "Getting started",
+      items: setup,
+      // Setup Evidence is never code, so it is never summarised.
+      system: () => GETTING_STARTED_SYSTEM,
+      verifySystem: () => VERIFY_SETUP_SYSTEM,
+      render: renderSetup,
+      item: "piece of Evidence",
+      uncited: "cites no script, CI step or doc",
+      writes: notDocsAlone,
+      check({ text }) {
+        const unmatched = unmatchedCommands(text, setup);
+        if (unmatched.length === 0) return undefined;
+        return `names ${unmatched.map((c) => `\`${c}\``).join(", ")}, which no package.json script, CI workflow step or existing doc runs`;
+      },
+    }),
+    [CONVENTIONS]: () => ({
+      title: "Conventions",
+      items: conventionsEvidence(target),
+      writes: hasConventions,
+      system: (_, summarised) => (summarised ? `${CONVENTIONS_SYSTEM}\n\n${SUMMARISED_NOTE}` : CONVENTIONS_SYSTEM),
+      verifySystem: () => VERIFY_CONVENTIONS_SYSTEM,
+      render: renderModuleEvidence,
+      item: "piece of Evidence",
+      uncited: "cites no lint or format config, code or CONTRIBUTING passage",
+    }),
+    [KEY_DECISIONS]: () => ({
+      title: "Key decisions",
       // The ADRs, then the discussion on the repo's highest-ranked pull requests, as spec #1's Generation order decides.
-      const items: Evidence[] = [...decisionRecords(docs), ...discussions.decisions];
-      return {
-        title: "Key decisions",
-        items,
-        evidence: new Map(items.map((e) => [e.id, e])),
-        // Written from the ADRs and pull request threads alone: docs are this Section's own Evidence.
-        writes: (sent) => sent.length > 0,
-        system: () => KEY_DECISIONS_SYSTEM,
-        verifySystem: () => VERIFY_DECISIONS_SYSTEM,
-        frame: (rendered) => rendered.join("\n\n"),
-        render: renderModuleEvidence,
-        item: "piece of Evidence",
-        uncited: "cites no ADR or pull request thread",
-      };
-    }
+      items: [...decisionRecords(docs), ...discussions.decisions],
+      // Written from the ADRs and pull request threads alone: docs are this Section's own Evidence.
+      writes: (sent) => sent.length > 0,
+      system: () => KEY_DECISIONS_SYSTEM,
+      verifySystem: () => VERIFY_DECISIONS_SYSTEM,
+      render: renderModuleEvidence,
+      item: "piece of Evidence",
+      uncited: "cites no ADR or pull request thread",
+    }),
+    [OVERVIEW]: () => bottomUpSubject(OVERVIEW),
+    [ARCHITECTURE]: () => bottomUpSubject(ARCHITECTURE),
+  };
+
+  function subject(section: string): Subject {
+    const spec = Object.hasOwn(topLevel, section) ? topLevel[section]!() : moduleSubject(section);
+    return { frame: (rendered) => rendered.join("\n\n"), ...spec, evidence: new Map(spec.items.map((e) => [e.id, e])) };
+  }
+
+  function moduleSubject(section: string): SubjectSpec {
     const module = moduleOf(section);
     // A Module's code symbols, then its GitHub Evidence, then the passages of existing docs about it.
     const discussion = discussions.byModule.get(module.path) ?? [];
-    const own: Evidence[] = [...moduleSymbols(module), ...discussion, ...docsAbout(module, symbols, docs)];
     return {
       title: module.name,
-      items: own,
-      evidence: new Map(own.map((e) => [e.id, e])),
+      items: [...moduleSymbols(module), ...discussion, ...docsAbout(module, symbols, docs)],
       // Told about GitHub discussion and summaries only when the request carries them, so requests without stay as recorded.
       system: (sent, summarised) => [
         SECTION_SYSTEM,
