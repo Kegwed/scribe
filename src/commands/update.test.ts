@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MODELS } from "../llm.ts";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
-import { type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
+import { type RecordedLlm, recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { generate } from "./generate.ts";
+import { status } from "./status.ts";
 import { update } from "./update.ts";
 
 const TARGET: Files = {
@@ -40,6 +41,46 @@ async function generated(files: Files = TARGET) {
   repo.commit({}, "generate the Guide");
   return repo;
 }
+
+describe("update against recorded responses", () => {
+  const PRICING: Files = {
+    "scribe.config.json": JSON.stringify({ modules: [{ name: "Pricing", path: "src/pricing" }, { name: "Greeting", path: "src/greeting" }] }),
+    "src/pricing/price.ts": [
+      "/** Rounds a price to whole cents. */",
+      "export function roundPrice(price: number) {",
+      "  return Math.round(price * 100) / 100;",
+      "}",
+      "",
+      'export const CURRENCY = "EUR";',
+      "",
+    ].join("\n"),
+    "src/greeting/greet.ts": "export function greet(name: string) {\n  return `Hello, ${name}`;\n}\n",
+  };
+  const PRICING_SECTION = "docs/guide/modules/src-pricing.md";
+  const GREETING_SECTION = "docs/guide/modules/src-greeting.md";
+
+  it("revises the Stale Section, keeping the Claim on the symbol that didn't change", async () => {
+    const repo = createFixtureRepo(PRICING);
+    await generate(repo.dir, {}, { llm: recordedLlm("update") });
+    repo.commit({}, "generate the Guide");
+    const greeting = read(repo.dir, GREETING_SECTION);
+    repo.commit({
+      "src/pricing/price.ts": PRICING["src/pricing/price.ts"]!
+        .replace("Rounds a price to whole cents", "Rounds a price down to whole cents")
+        .replace("Math.round", "Math.floor"),
+    });
+
+    await update(repo.dir, {}, { llm: recordedLlm("update") });
+
+    const pricing = read(repo.dir, PRICING_SECTION);
+    expect(pricing).toMatch(/^\[\^\d+\]: src\/pricing\/price\.ts \(roundPrice\)$/m);
+    expect(pricing).toMatch(/^\[\^\d+\]: src\/pricing\/price\.ts \(CURRENCY\)$/m);
+    const [, ...prose] = pricing.split("\n\n").filter((block) => !block.startsWith("[^"));
+    for (const paragraph of prose) expect(paragraph).toMatch(/\[\^\d+\]$/);
+    expect(read(repo.dir, GREETING_SECTION)).toBe(greeting);
+    expect((await status(repo.dir)).sections.filter((s) => s.stale)).toEqual([]);
+  });
+});
 
 describe("update", () => {
   it("rewrites only the Section citing a changed symbol, from its current text and the change", async () => {

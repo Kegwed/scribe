@@ -1,0 +1,10 @@
+{
+  "_handwritten": "These responses were written by hand, not recorded from Claude. Replace them with npm run record.",
+  "bf3369f77388620d8467f99a17d2eee1fd5ca9a2a6a03d3d64eea9909992d79b": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Pricing Module exports roundPrice, which rounds a price to whole cents.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]},{\"text\":\"It also exports the CURRENCY constant, set to \\\"EUR\\\".\",\"evidence\":[\"src/pricing/price.ts#CURRENCY\"]}]}]}",
+  "68201116c7041f2aa404db7bbdfc22c4a8abb6378d112474a8cdaf475f9d6aca": "{\"confirmed\":true,\"reason\":\"The cited symbol shows everything the Claim states.\"}",
+  "07585d35f011ce6572aaf2941e56b0cbb273d3ef092f81763d36d0230acc88d3": "{\"confirmed\":true,\"reason\":\"The cited symbol shows everything the Claim states.\"}",
+  "a978b2ca6f8d248525b7fa257e07df1e0378f8eaefa3699f52b1db74a5758f4c": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Greeting Module exports greet, which returns a greeting that includes the given name.\",\"evidence\":[\"src/greeting/greet.ts#greet\"]}]}]}",
+  "61af2a145cdc1f7c5f3262da9e0c3acbe8253eecac61bc7069d6435276c17e74": "{\"confirmed\":true,\"reason\":\"The cited symbol shows everything the Claim states.\"}",
+  "8397893974de089196e107a9692b39df41c3dce79befb4a08eb7d569de9a7366": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Pricing Module exports roundPrice, which rounds a price down to whole cents.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]},{\"text\":\"It also exports the CURRENCY constant, set to \\\"EUR\\\".\",\"evidence\":[\"src/pricing/price.ts#CURRENCY\"]}]}]}",
+  "fd5b56a109f490aa30217a5e036a9115818fae2c721a5e06e083594d67ae96bb": "{\"confirmed\":true,\"reason\":\"The cited symbol shows everything the Claim states.\"}"
+}
