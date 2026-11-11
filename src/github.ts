@@ -26,6 +26,8 @@ export function isGitHubEvidence(id: string): boolean {
 
 /** How many pull requests, with their linked issues, each Module Section is offered. */
 export const PULL_REQUESTS_PER_MODULE = 5;
+/** How many of the repo's highest-ranked pull requests, with their linked issues, Key decisions is offered. */
+export const PULL_REQUESTS_FOR_DECISIONS = 10;
 /** A pull request's rank halves for each year it was merged before the newest one. */
 const RANK_HALF_LIFE_DAYS = 365;
 
@@ -52,14 +54,14 @@ export async function gitHubEvidence(
   warnings: string[],
 ): Promise<Discussions> {
   try {
-    return { byModule: await rankedEvidence(repoDir, github, modules), decisions: [] };
+    return await rankedEvidence(repoDir, github, modules);
   } catch (error) {
     warnings.push(`GitHub skipped, so no pull requests or issues are cited: ${error instanceof Error ? error.message : String(error)}`);
     return NO_DISCUSSIONS;
   }
 }
 
-async function rankedEvidence(repoDir: string, github: GitHub, modules: Module[]): Promise<Map<string, GitHubEvidence[]>> {
+async function rankedEvidence(repoDir: string, github: GitHub, modules: Module[]): Promise<Discussions> {
   const cached = cachedGitHub(repoDir, github);
   const merged = (await cached.pullRequests()).filter((pr) => pr.mergedAt !== null);
   const rank = ranking(merged);
@@ -72,15 +74,17 @@ async function rankedEvidence(repoDir: string, github: GitHub, modules: Module[]
   }
 
   const details = new Map<number, Promise<GitHubEvidence[]>>();
-  const evidence = new Map<string, GitHubEvidence[]>();
-  for (const [path, pulls] of chosen) {
-    const top = pulls.sort((a, b) => rank(b) - rank(a) || b.number - a.number).slice(0, PULL_REQUESTS_PER_MODULE);
+  const discussionOfTop = async (pulls: PullRequestSummary[], count: number) => {
+    const top = [...pulls].sort((a, b) => rank(b) - rank(a) || b.number - a.number).slice(0, count);
     for (const { number } of top) {
       if (!details.has(number)) details.set(number, cached.pullRequest(number).then(discussionOf));
     }
-    evidence.set(path, (await Promise.all(top.map(({ number }) => details.get(number)!))).flat());
-  }
-  return evidence;
+    return (await Promise.all(top.map(({ number }) => details.get(number)!))).flat();
+  };
+  const byModule = new Map<string, GitHubEvidence[]>();
+  for (const [path, pulls] of chosen) byModule.set(path, await discussionOfTop(pulls, PULL_REQUESTS_PER_MODULE));
+  // Whichever files they touched: a decision can concern the whole repo.
+  return { byModule, decisions: await discussionOfTop(merged, PULL_REQUESTS_FOR_DECISIONS) };
 }
 
 /**
