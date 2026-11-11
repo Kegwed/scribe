@@ -1,0 +1,6 @@
+{
+  "c3d85c1c01d0d1aaa942e9d353f6a12adcef1936d953fcc8f09de53b7621aa1f": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Auth Module exports createSession, which takes a user string and returns it unchanged.\",\"evidence\":[\"src/auth/session.ts#createSession\"]}]}]}",
+  "242b37e5ec9719bcca880f488bd3c0db156109a6f955e71e6e552186bf8e83f7": "{\"confirmed\":true,\"reason\":\"The cited Evidence shows this.\"}",
+  "b4f749f06b2ea4a9883e5fd9e2f828b7fa78d956d3f84b32bd46821efb74cbef": "{\"drift\":[{\"description\":\"The README says createSession takes a user and a ttl, but createSession takes only a user.\",\"docs\":[\"README.md#sessions\"],\"code\":[\"src/auth/session.ts#createSession\"]}]}",
+  "b365a025540e37a8f807463d8ce7b58557b90e8213db7fb9b8803375af77fd79": "{\"confirmed\":true,\"reason\":\"The cited Evidence shows this.\"}"
+}

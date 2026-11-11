@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
-import { scriptedLlm } from "../test/recorded-llm.ts";
+import { recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { generate } from "./generate.ts";
 import { status } from "./status.ts";
 import { update } from "./update.ts";
@@ -114,6 +114,22 @@ describe("existing docs as a Source", () => {
 
       expect(result.drift).toEqual([{ section: "modules/src-auth", ...DRIFT }]);
       expect((await status(repo.dir)).drift).toEqual([{ section: "modules/src-auth", ...DRIFT }]);
+    });
+
+    it("finds Drift, and writes a Section that may cite the docs, with recorded responses", async () => {
+      const repo = createFixtureRepo(CONTRADICTING);
+
+      const result = await generate(repo.dir, {}, { llm: recordedLlm("existing-docs") });
+
+      expect(result.drift).toEqual([{
+        section: "modules/src-auth",
+        description: expect.any(String),
+        docs: ["README.md#sessions"],
+        code: ["src/auth/session.ts#createSession"],
+      }]);
+      const [, ...prose] = read(repo.dir, SECTION).split("\n\n").filter((block) => !block.startsWith("[^"));
+      expect(prose.length).toBeGreaterThan(0);
+      for (const paragraph of prose) expect(paragraph).toMatch(/\[\^\d+\]$/);
     });
 
     it("makes a Section Stale when a doc it found Drift in is fixed, and update clears the Drift", async () => {
