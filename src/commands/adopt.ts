@@ -2,7 +2,7 @@ import type { Adapters } from "../adapters.ts";
 import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR } from "../manifest.ts";
 import { emptyReport, sectionWriter } from "../section-writer.ts";
-import { clearProposal, openTarget, readSection, sectionModule, sectionPath } from "../target.ts";
+import { clearProposal, openTarget, readSection, guideSection,sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
 
 export interface AdoptOptions {}
@@ -28,15 +28,15 @@ export async function adopt(
   { llm, github }: Adapters,
 ): Promise<AdoptResult> {
   const target = await openTarget(repoDir);
-  const module = sectionModule(target, section);
+  const module = guideSection(target, section);
   const path = sectionPath(target.config, section);
   const content = await readSection(repoDir, path);
   if (content === undefined) throw new Error(`${path} doesn't exist, so there is nothing to adopt; scribe reset ${section} writes it`);
   await gitIgnore(repoDir, CACHE_DIR);
 
   const report = emptyReport();
-  const discussions = github && (await gitHubEvidence(repoDir, github, [module], report.warnings));
-  const unsupported = await sectionWriter(repoDir, target, llm, report, discussions).adopt(module, content);
+  const discussions = github && module && (await gitHubEvidence(repoDir, github, [module], report.warnings));
+  const unsupported = await sectionWriter(repoDir, target, llm, report, discussions).adopt(section, content);
   const clearedProposal = await clearProposal(repoDir, target.config, section);
   return {
     unsupportedClaims: unsupported.map((text) => ({ section, text })),
