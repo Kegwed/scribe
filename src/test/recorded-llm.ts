@@ -43,10 +43,12 @@ export function recordedLlm(name: string): RecordedLlm {
  * A fake for edge cases a live model won't reliably produce. Writes answer with
  * `sections`: a list is used in turn with its last entry repeating, anything else
  * answers every write. The verifier answers from `verdicts`, keyed by a Claim's
- * text, and confirms any Claim not listed. Requests made together are answered
+ * text, and confirms any Claim not listed. Asked which Evidence backs an adopted
+ * Section's Claims, it answers from `attachments`, keyed by a Claim's text, and
+ * attaches no Evidence to any Claim not listed. Requests made together are answered
  * last first, so code that depends on the order answers arrive in fails here.
  */
-export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown> = {}): RecordedLlm {
+export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown> = {}, attachments: Record<string, string[]> = {}): RecordedLlm {
   const calls: LlmRequest[] = [];
   const writes = Array.isArray(sections) ? sections : [sections];
   let written = 0;
@@ -62,6 +64,12 @@ export function scriptedLlm(sections: unknown, verdicts: Record<string, unknown>
         }
       });
       if (request.model === MODELS.write) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
+      if ("attachments" in ((request.schema.properties ?? {}) as object)) {
+        const claims = [...request.prompt.matchAll(/<claim index="(\d+)">\n(.*)\n<\/claim>/g)];
+        return asResponseText({
+          attachments: claims.map(([, index, text]) => ({ claim: Number(index), evidence: attachments[text!] ?? [] })),
+        });
+      }
       const claim = Object.keys(verdicts).find((key) => request.prompt.includes(key));
       return asResponseText(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);
     },

@@ -27,6 +27,8 @@ export interface StatusResult {
   sections: SectionStatus[];
   /** Proposals `update` wrote for Frozen, Stale Sections, pending until a human merges and deletes them (ADR-0002). */
   proposals: { section: string; file: string }[];
+  /** Claims in adopted Sections for which no Evidence was found, as the manifest records them. */
+  unsupportedClaims: { section: string; text: string }[];
 }
 
 /**
@@ -57,7 +59,9 @@ export async function status(repoDir: string): Promise<StatusResult> {
     const frozen = isFrozen(await readSection(repoDir, file), undefined);
     return { section, file, added: !frozen, removed: false, missing: false, frozen, stale: false, changedEvidence: [] };
   }));
-  return { sections: [...recorded, ...unrecorded], proposals: await pendingProposals(repoDir, config) };
+  const unsupportedClaims = Object.entries(manifest.sections)
+    .flatMap(([section, record]) => (record.unsupportedClaims ?? []).map((text) => ({ section, text })));
+  return { sections: [...recorded, ...unrecorded], proposals: await pendingProposals(repoDir, config), unsupportedClaims };
 }
 
 /** Every Proposal file in the Guide, including one whose Section's Module has since been removed. */

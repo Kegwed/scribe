@@ -1,0 +1,40 @@
+import type { Adapters } from "../adapters.ts";
+import { CACHE_DIR } from "../manifest.ts";
+import { emptyReport, sectionWriter } from "../section-writer.ts";
+import { clearProposal, openTarget, readSection, sectionModule, sectionPath } from "../target.ts";
+import { gitIgnore } from "./init.ts";
+
+export interface AdoptOptions {}
+
+export interface AdoptResult {
+  /** The adopted Section's Claims for which the verifier found no Evidence; kept in the Section, never deleted. */
+  unsupportedClaims: { section: string; text: string }[];
+  /** The Section's pending Proposal, deleted because the adopted text is now the baseline. */
+  clearedProposal?: string;
+}
+
+/**
+ * Takes a Section's text as a human left it as the new baseline, so it is no
+ * longer Frozen: Evidence is recorded for each Claim the verifier can back, and
+ * the rest are recorded as Unsupported Claims. The text itself is never changed (ADR-0002).
+ */
+export async function adopt(
+  repoDir: string,
+  section: string,
+  _options: AdoptOptions,
+  { llm }: Pick<Adapters, "llm">,
+): Promise<AdoptResult> {
+  const target = await openTarget(repoDir);
+  const module = sectionModule(target, section);
+  const path = sectionPath(target.config, section);
+  const content = await readSection(repoDir, path);
+  if (content === undefined) throw new Error(`${path} doesn't exist, so there is nothing to adopt; scribe reset ${section} writes it`);
+  await gitIgnore(repoDir, CACHE_DIR);
+
+  const unsupported = await sectionWriter(repoDir, target, llm, emptyReport()).adopt(module, content);
+  const clearedProposal = await clearProposal(repoDir, target.config, section);
+  return {
+    unsupportedClaims: unsupported.map((text) => ({ section, text })),
+    ...(clearedProposal ? { clearedProposal } : {}),
+  };
+}
