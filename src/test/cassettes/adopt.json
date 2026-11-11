@@ -1,0 +1,5 @@
+{
+  "e5a5b652bd4c6d27e3fe019c4d46d5e868cd85528520f9f26d6c0f25bb102420": "{\"attachments\":[{\"claim\":0,\"evidence\":[\"src/pricing/price.ts#roundPrice\"]},{\"claim\":1,\"evidence\":[\"src/pricing/price.ts#CURRENCY\"]},{\"claim\":2,\"evidence\":[]}]}",
+  "d45ab51a353c2a1d27a85f58a6f5cd7e9a7d0c104cd2c3e7bf16cbf526985f4f": "{\"confirmed\":true,\"reason\":\"roundPrice multiplies by 100, rounds and divides by 100, rounding to whole cents.\"}",
+  "7ba6fd95a668febbcd951c8dd22087f0b59ad9485e3789077ddec120797db104": "{\"confirmed\":false,\"reason\":\"CURRENCY is \\\"EUR\\\", but nothing shows that every price uses it.\"}"
+}

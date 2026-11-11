@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
-import { scriptedLlm } from "../test/recorded-llm.ts";
+import { recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { adopt } from "./adopt.ts";
 import { generate } from "./generate.ts";
 import { status } from "./status.ts";
@@ -43,6 +43,38 @@ async function generated(files: Files = TARGET) {
   repo.commit({}, "generate the Guide");
   return repo;
 }
+
+describe("adopt against recorded responses", () => {
+  it("records Evidence for the human's Claims the code backs and keeps the rest as Unsupported", async () => {
+    const repo = createFixtureRepo({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "Pricing", path: "src/pricing" }] }),
+      "src/pricing/price.ts": [
+        "/** Rounds a price to whole cents. */",
+        "export function roundPrice(price: number) {",
+        "  return Math.round(price * 100) / 100;",
+        "}",
+        "",
+        'export const CURRENCY = "EUR";',
+        "",
+      ].join("\n"),
+    });
+    await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "Prices are in euros.", evidence: ["src/pricing/price.ts#CURRENCY"] }] }] }) });
+    const mine = "# Pricing\n\nroundPrice rounds a price to whole cents. Every price is in euros.\n\nThe team plans to add more currencies next year.\n";
+    repo.commit({ "docs/guide/modules/src-pricing.md": mine });
+
+    const { unsupportedClaims } = await adopt(repo.dir, "modules/src-pricing", {}, { llm: recordedLlm("adopt") });
+
+    expect(read(repo.dir, "docs/guide/modules/src-pricing.md")).toBe(mine);
+    const sentences = ["roundPrice rounds a price to whole cents.", "Every price is in euros.", "The team plans to add more currencies next year."];
+    for (const { text } of unsupportedClaims) expect(sentences).toContain(text);
+    const record = manifest(repo.dir).sections["modules/src-pricing"];
+    expect(record.unsupportedClaims ?? []).toEqual(unsupportedClaims.map(({ text }) => text));
+    const ids = record.evidence.map((e: { id: string }) => e.id);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) expect(["src/pricing/price.ts#roundPrice", "src/pricing/price.ts#CURRENCY"]).toContain(id);
+    expect((await status(repo.dir)).sections[0]).toEqual(expect.objectContaining({ frozen: false, stale: false }));
+  });
+});
 
 describe("adopt", () => {
   it("makes a Frozen Section's text the baseline, recording the Evidence the verifier confirms", async () => {
