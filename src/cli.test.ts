@@ -7,16 +7,64 @@ import { scriptedLlm } from "./test/recorded-llm.ts";
 
 const cli = fileURLToPath(new URL("./cli.ts", import.meta.url));
 
-/** Runs the CLI with no API key and Claude's endpoint unreachable, so any LLM call would fail. */
+/** Runs the CLI with no API key and Claude's endpoint unreachable, so any LLM call would fail; `input` is its stdin. */
 function scribe(dir: string, ...args: string[]) {
+  return scribeWithInput(dir, "", ...args);
+}
+
+function scribeWithInput(dir: string, input: string, ...args: string[]) {
   const { ANTHROPIC_API_KEY: _, ...env } = process.env;
   const { status, stdout, stderr } = spawnSync(process.execPath, [cli, ...args], {
     cwd: dir,
     encoding: "utf8",
+    input,
     env: { ...env, ANTHROPIC_BASE_URL: "http://127.0.0.1:9" },
   });
   return { status, stdout, stderr };
 }
+
+describe("scribe generate's cost estimate", () => {
+  function target() {
+    return createFixtureRepo({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }, { name: "B", path: "src/b" }] }),
+      "src/a/a.ts": "export const a = 1;\n",
+      "src/b/b.ts": "export const b = 1;\n",
+    });
+  }
+
+  it("prints the estimate per Section and, declined, writes nothing and exits non-zero", () => {
+    const repo = target();
+
+    const { status, stdout } = scribeWithInput(repo.dir, "n\n", "generate");
+
+    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 2 Sections, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\n  modules\/src-b  \$\d+\.\d+\n  plus 1 cached Section at no cost\nContinue\? \[y\/N\] /);
+    expect(stdout).toMatch(/Cancelled; no LLM was called and nothing was written\.\n$/);
+    expect(status).toBe(1);
+    expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
+  });
+
+  it("declines when stdin closes without an answer", () => {
+    const repo = target();
+
+    const { status, stdout } = scribe(repo.dir, "generate");
+
+    expect(stdout).toContain("Cancelled;");
+    expect(status).toBe(1);
+  });
+
+  it("skips the prompt with --yes and goes on to call the LLM", () => {
+    const repo = target();
+
+    const { status, stdout, stderr } = scribe(repo.dir, "generate", "--yes");
+
+    expect(stdout).toMatch(/^Estimated cost: /);
+    expect(stdout).not.toContain("Continue?");
+    expect(stdout).not.toContain("Cancelled;");
+    // No API key is set, so reaching the LLM is what fails the run.
+    expect(stderr).toMatch(/^scribe: /);
+    expect(status).toBe(1);
+  });
+});
 
 describe("scribe status", () => {
   async function generated() {

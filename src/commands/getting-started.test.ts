@@ -134,6 +134,17 @@ describe("generate: Getting started", () => {
     expect(result.droppedClaims).toContainEqual(expect.objectContaining({ section: "getting-started", text: "Deploy with `npm run deploy`." }));
   });
 
+  it("counts Getting started in the cost estimate", async () => {
+    const repo = createFixtureRepo(TARGET);
+    const llm = scriptedLlm("unused");
+    let sections: { section: string; tokens: number }[] = [];
+
+    await generate(repo.dir, { confirm: async (estimate) => ((sections = estimate.sections), false) }, { llm });
+
+    expect(sections.find((s) => s.section === "getting-started")?.tokens).toBeGreaterThan(0);
+    expect(llm.calls).toEqual([]);
+  });
+
   it("writes a bare Getting started, without asking the LLM, when the repo has no scripts, CI or docs", async () => {
     const repo = createFixtureRepo({ "scribe.config.json": JSON.stringify({ modules: [{ name: "Empty", path: "src/empty" }] }) });
     const llm = scriptedLlm("unused");
