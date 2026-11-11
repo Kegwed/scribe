@@ -28,6 +28,12 @@ import {
 export interface WriteReport {
   /** Claims still unconfirmed after the Section's repair, left out of their Sections (ADR-0001). */
   droppedClaims: { section: string; text: string; reason: string; /** Dropped from the Section's Proposal, not the Section. */ proposal?: true }[];
+  /**
+   * For each Section or Proposal written, how many Claims were first written,
+   * how many of those the verifier confirmed before any repair, and how many
+   * were kept once any repair was verified.
+   */
+  verifiedClaims: { section: string; written: number; confirmed: number; kept: number; /** Counts the Section's Proposal. */ proposal?: true }[];
   /** Sections left untouched, without a Proposal, because a human has edited them (ADR-0002). */
   frozen: string[];
   /**
@@ -43,7 +49,7 @@ export interface WriteReport {
 }
 
 export function emptyReport(): WriteReport {
-  return { droppedClaims: [], frozen: [], reduced: [], warnings: [], drift: [] };
+  return { droppedClaims: [], verifiedClaims: [], frozen: [], reduced: [], warnings: [], drift: [] };
 }
 
 /** What a run is expected to cost before any LLM call, Section by Section; work already cached costs nothing. */
@@ -396,6 +402,9 @@ export function sectionWriter(
     const firstPrompt = fitted.prompt;
     let written: SectionResponse = about.writes(fitted.sent) ? await writeSection(firstPrompt) : { paragraphs: [] };
     let failures = await verifySection(llm, models.verify, repoDir, written, about);
+    const firstWritten = written.paragraphs.reduce((sum, p) => sum + p.claims.length, 0);
+    const counts = { section, written: firstWritten, confirmed: firstWritten - failures.size, kept: 0, ...(proposal ? { proposal } : {}) };
+    report.verifiedClaims.push(counts);
     if (failures.size > 0) {
       written = await writeSection(repairPrompt(firstPrompt, written, failures));
       failures = await verifySection(llm, models.verify, repoDir, written, about);
@@ -413,6 +422,7 @@ export function sectionWriter(
           report.droppedClaims.push({ section, text, reason, ...(proposal ? { proposal } : {}) });
           continue;
         }
+        counts.kept++;
         const known = ids.filter((id) => evidence.has(id));
         for (const id of known) cited.set(id, evidence.get(id)!);
         const numbers = [...cited.keys()];
