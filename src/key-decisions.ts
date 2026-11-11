@@ -3,7 +3,7 @@ import { type DocEvidence, isDecisionRecord } from "./docs.ts";
 /** The Key decisions Section's id, which is also its file's path in the Guide, without the extension. */
 export const KEY_DECISIONS = "key-decisions";
 
-/** The passages of existing docs Key decisions is written from: the repo's ADRs (ADR-0005). */
+/** The passages of existing docs Key decisions is written from: the repo's ADRs, as spec #1's Generation order decides. */
 export function decisionRecords(docs: DocEvidence[]): DocEvidence[] {
   return docs.filter(isDecisionRecord);
 }

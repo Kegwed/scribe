@@ -54,6 +54,19 @@ describe("existing docs as a Source", () => {
     expect(evidence.map((e: { id: string }) => e.id)).toEqual(["README.md#sessions", "src/auth/session.ts#createSession", "history:src/auth"]);
   });
 
+  it("tells the verifier of a Claim citing a doc passage that the passage is Evidence too", async () => {
+    const repo = createFixtureRepo(TARGET);
+    const llm = scriptedLlm({
+      paragraphs: [{ claims: [{ text: "Sessions start with createSession.", evidence: ["README.md#sessions"] }, { text: "It returns the user.", evidence: ["src/auth/session.ts#createSession"] }] }],
+    });
+
+    await generate(repo.dir, {}, { llm });
+
+    const verifying = (text: string) => llm.calls.find((c) => c.prompt.startsWith(`<claim>\n${text}\n`))!.system;
+    expect(verifying("Sessions start with createSession.")).toContain("<doc>");
+    expect(verifying("It returns the user.")).not.toContain("<doc>");
+  });
+
   describe("staleness", () => {
     const CITING = {
       paragraphs: [{ claims: [{ text: "Sessions start with createSession.", evidence: ["README.md#sessions"] }] }],
@@ -176,9 +189,20 @@ describe("existing docs as a Source", () => {
       await generate(repo.dir, {}, { llm: llm() });
       repo.commit({ [SECTION]: "# Auth\n\ncreateSession takes a user.\n" });
 
-      await adopt(repo.dir, "modules/src-auth", {}, { llm: llm() });
+      await adopt(repo.dir, "modules/src-auth", { llm: llm() });
 
       expect((await status(repo.dir)).drift).toEqual([{ section: "modules/src-auth", ...DRIFT }]);
+    });
+
+    it("asks the verifier whether the doc says what the Drift says it does and the code shows otherwise", async () => {
+      const repo = createFixtureRepo(CONTRADICTING);
+      const scripted = llm();
+
+      await generate(repo.dir, {}, { llm: scripted });
+
+      const check = scripted.calls.find((c) => c.prompt.startsWith(`<claim>\n${DRIFT.description}\n`))!;
+      expect(check.system).toContain("<doc>");
+      expect(check.system).toContain("contradict");
     });
 
     it("reports no Drift the verifier can't confirm against both sides", async () => {

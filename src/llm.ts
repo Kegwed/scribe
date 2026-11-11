@@ -50,6 +50,12 @@ export function approximateTokens(text: string): number {
 }
 
 export interface LlmRequest {
+  /**
+   * What the request asks for: a Section `write`, a symbol's `summary`, a
+   * verifier's `verdict`, the Evidence to `attach` to a human's Claims, or a
+   * `drift` search. Not part of its key: the rest of the request says the same.
+   */
+  kind: "write" | "summary" | "verdict" | "attach" | "drift";
   model: string;
   system: string;
   prompt: string;

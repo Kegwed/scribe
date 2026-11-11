@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeLlm, type Llm, type LlmRequest, PROMPT_LIMIT, requestKey } from "../llm.ts";
-import { SUMMARY_SYSTEM } from "../section-writer.ts";
 
 const CASSETTES = join(dirname(fileURLToPath(import.meta.url)), "cassettes");
 
@@ -82,29 +81,37 @@ export function scriptedLlm(
           setTimeout(() => waiting.splice(0).reverse().forEach((next, i) => setTimeout(next, i * 50)));
         }
       });
-      const title = request.prompt.match(/^Section: (.+)/)?.[1];
-      if (isSectionWrite(request) && title !== undefined) return asResponseText(topLevel[title] ?? { paragraphs: [] });
-      if (isSectionWrite(request)) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
-      if ("attachments" in ((request.schema.properties as object | undefined) ?? {})) {
-        const claims = [...request.prompt.matchAll(/<claim index="(\d+)">\n(.*)\n<\/claim>/g)];
-        return asResponseText({
-          attachments: claims.map(([, index, text]) => ({ claim: Number(index), evidence: attachments[text!] ?? [] })),
-        });
+      switch (request.kind) {
+        case "write": {
+          // Overview and Architecture are asked for by title, the first line of their prompt.
+          const title = request.prompt.match(/^Section: (.+)/)?.[1];
+          if (title !== undefined) return asResponseText(topLevel[title] ?? { paragraphs: [] });
+          return asResponseText(writes[Math.min(written++, writes.length - 1)]);
+        }
+        case "attach": {
+          const claims = [...request.prompt.matchAll(/<claim index="(\d+)">\n(.*)\n<\/claim>/g)];
+          return asResponseText({
+            attachments: claims.map(([, index, text]) => ({ claim: Number(index), evidence: attachments[text!] ?? [] })),
+          });
+        }
+        case "summary": {
+          const id = request.prompt.match(/<symbol id="([^"]*)"/)?.[1] ?? "";
+          return asResponseText({ summary: id in summaries ? summaries[id] : `Summary of ${id}.` });
+        }
+        case "drift":
+          return asResponseText({ drift });
+        case "verdict": {
+          const claim = Object.keys(verdicts).find((key) => request.prompt.includes(key));
+          return asResponseText(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);
+        }
       }
-      if (request.system === SUMMARY_SYSTEM) {
-        const id = request.prompt.match(/<symbol id="([^"]*)"/)?.[1] ?? "";
-        return asResponseText({ summary: id in summaries ? summaries[id] : `Summary of ${id}.` });
-      }
-      if ("drift" in ((request.schema.properties ?? {}) as object)) return asResponseText({ drift });
-      const claim = Object.keys(verdicts).find((key) => request.prompt.includes(key));
-      return asResponseText(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);
     },
   };
 }
 
-/** Whether a request asks for a Section rather than a verdict; told apart by schema, since config can change either's model. */
+/** Whether a request asks for a Section to be written. */
 export function isSectionWrite(request: LlmRequest): boolean {
-  return "paragraphs" in ((request.schema.properties as object | undefined) ?? {});
+  return request.kind === "write";
 }
 
 function asResponseText(response: unknown): string {

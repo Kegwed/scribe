@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { fakeGitHub } from "../test/fake-github.ts";
-import type { CostEstimate } from "../section-writer.ts";
+import type { CostEstimate } from "../estimate.ts";
 import { isSectionWrite, recordedLlm, type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { HOT, STABLE, stableSection } from "../test/sections.ts";
 import { generate } from "./generate.ts";
@@ -625,6 +625,20 @@ describe("generate", () => {
       expect(read(repo.dir, SECTION)).toBe(stableSection("A", "src/a", "NAMES lists forty names.[^1]", ["[^1]: src/a/a.ts (NAMES)"]));
       expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: [], leftOut: ["src/a/a.ts#helper"] }]);
       expect(result.droppedClaims).toContainEqual(expect.objectContaining({ text: "Run delegates to a helper." }));
+    });
+
+    it("keeps its Drift search within the limit, leaving out code before the docs, and says what it left out", async () => {
+      const repo = createFixtureRepo({ ...LARGE, "README.md": "# A\n\nCall run with a value.\n" });
+      const llm = scriptedLlm(cites("Run delegates to a helper.", "src/a/a.ts#run"), {}, { promptLimit: LIMIT });
+
+      const result = await generate(repo.dir, {}, { llm });
+
+      const searches = llm.calls.filter((call) => call.kind === "drift");
+      expect(searches).toHaveLength(1);
+      expect(searches[0]!.prompt.length).toBeLessThanOrEqual(LIMIT);
+      expect(searches[0]!.prompt).toContain('<doc id="README.md#a">');
+      expect(searches[0]!.prompt).toContain('<symbol id="src/a/a.ts#run"');
+      expect(result.warnings).toEqual(["The Drift search for modules/src-a left out src/a/a.ts#helper to fit one request."]);
     });
 
     it("leaves out GitHub discussion before any code symbol", async () => {

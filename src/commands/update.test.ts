@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { CostEstimate } from "../section-writer.ts";
+import type { CostEstimate } from "../estimate.ts";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { isSectionWrite, type RecordedLlm, recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { HOT, STABLE, stableSection } from "../test/sections.ts";

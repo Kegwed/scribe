@@ -211,6 +211,32 @@ describe("generate: Conventions", () => {
     expect(read(repo.dir, "docs/guide/conventions.proposal.md")).toBe("# Conventions\n\nLint rules allow `var`.[^1]\n\n[^1]: eslint.config.js (ESLint config)\n");
   });
 
+  it("cites lint and format config kept in package.json, and is Stale once it changes", async () => {
+    const pkg = (noVar: string) => JSON.stringify({
+      name: "app",
+      eslintConfig: { rules: { "prefer-const": "error", "no-var": noVar } },
+      prettier: { singleQuote: true },
+    }, null, 2) + "\n";
+    const { "eslint.config.js": _, ".prettierrc": __, ...rest } = TARGET;
+    const repo = createFixtureRepo({ ...rest, "package.json": pkg("error") });
+    await generate(repo.dir, {}, {
+      llm: conventionsLlm(["Lint rules require `const`.", ["package.json#eslintConfig"]], ["Strings use single quotes.", ["package.json#prettier"]]),
+    });
+
+    expect(read(repo.dir, SECTION)).toBe([
+      "# Conventions",
+      "",
+      "Lint rules require `const`.[^1] Strings use single quotes.[^2]",
+      "",
+      "[^1]: package.json (ESLint config)",
+      "[^2]: package.json (Prettier config)",
+      "",
+    ].join("\n"));
+    repo.commit({ "package.json": pkg("off") });
+    expect((await status(repo.dir)).sections.find((s) => s.section === "conventions"))
+      .toMatchObject({ stale: true, changedEvidence: ["package.json#eslintConfig"] });
+  });
+
   it("is not Stale when a lint config it doesn't cite changes", async () => {
     const repo = createFixtureRepo(TARGET);
     await generate(repo.dir, {}, { llm: conventionsLlm(["Lint rules require `const`.", ["eslint.config.js"]]) });

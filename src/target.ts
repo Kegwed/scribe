@@ -7,38 +7,33 @@ import { CONVENTIONS, lintConfigEvidence } from "./conventions.ts";
 import { type DocEvidence, readDocs } from "./docs.ts";
 import { GETTING_STARTED, type SetupEvidence, setupEvidence } from "./getting-started.ts";
 import { type ChurnEvidence, churnEvidence } from "./git-history.ts";
-import type { FileEvidence } from "./section-writer.ts";
-import { isGitHubEvidence } from "./github.ts";
+import type { FileEvidence, RepoEvidence } from "./evidence.ts";
+import { type FetchedDiscussions, type GitHub, gitHubEvidence, isGitHubEvidence } from "./github.ts";
 import { contentHash } from "./hash.ts";
 import { KEY_DECISIONS } from "./key-decisions.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
 import { detectModules, type Module } from "./modules.ts";
 
-/**
- * Evidence about the Target repo as a whole, which Overview and Architecture
- * cite directly instead of the Module Sections they are built from (ADR-0005).
- */
-export interface RepoEvidence {
-  /** `graph:<name>` for what Scribe derives from the code, `file:<path>` for a file's content. */
-  id: string;
-  /** Labels the Evidence in its citation. */
-  label: string;
-  text: string;
-  /** Hash of `text`. */
-  hash: string;
-  /** The lines of a file it is, if it is a file's content, which its citation links to. */
-  source?: { file: string; startLine: number; endLine: number };
-}
-
-/** Told apart structurally: GitHub Evidence has a `url`, Evidence in a file a `file`, and this neither. */
-export function isRepoEvidence(item: object): item is RepoEvidence {
-  return "label" in item && !("url" in item) && !("file" in item);
-}
-
 export const OVERVIEW = "overview";
 export const ARCHITECTURE = "architecture";
-/** Written after the Module Sections, from them and the repo-wide Evidence (ADR-0005). */
-export const BOTTOM_UP_SECTIONS = [OVERVIEW, ARCHITECTURE];
+
+/**
+ * The Guide's top-level Sections by id, in the order they are written after
+ * the Module Sections, and whether each cites GitHub Evidence. Overview and
+ * Architecture come last: they are built from the Module Sections (ADR-0005).
+ */
+const TOP_LEVEL_SECTIONS: Record<string, { drawsOnGitHub: boolean }> = {
+  [GETTING_STARTED]: { drawsOnGitHub: false },
+  [CONVENTIONS]: { drawsOnGitHub: false },
+  [KEY_DECISIONS]: { drawsOnGitHub: true },
+  [OVERVIEW]: { drawsOnGitHub: false },
+  [ARCHITECTURE]: { drawsOnGitHub: false },
+};
+
+/** Whether a Section is a top-level one rather than a Module's. */
+export function isTopLevelSection(section: string): boolean {
+  return Object.hasOwn(TOP_LEVEL_SECTIONS, section);
+}
 
 /** A Target repo as every command that reads its Guide sees it. */
 export interface Target {
@@ -82,7 +77,7 @@ export async function openTarget(repoDir: string): Promise<Target> {
  * Architecture, which are built from the Module Sections (ADR-0005).
  */
 export function guideSections({ sectionIds }: Target): string[] {
-  return [...sectionIds.values(), GETTING_STARTED, CONVENTIONS, KEY_DECISIONS, ...BOTTOM_UP_SECTIONS];
+  return [...sectionIds.values(), ...Object.keys(TOP_LEVEL_SECTIONS)];
 }
 
 /** Every piece of Evidence a Section could cite that Scribe can see change without the network, as it is now. */
@@ -114,27 +109,42 @@ export function changedEvidence(record: SectionRecord, evidence: { id: string; h
   return [...new Set(cited.filter(({ id, hash }) => !isGitHubEvidence(id) && hashes.get(id) !== hash).map(({ id }) => id))];
 }
 
-/** A Section file's content, or undefined if it doesn't exist. */
+/** A Section file's content, or undefined if it doesn't exist; throws, naming it, if it can't be read. */
 export async function readSection(repoDir: string, path: string): Promise<string | undefined> {
   const file = join(repoDir, path);
-  return existsSync(file) ? await readFile(file, "utf8") : undefined;
+  if (!existsSync(file)) return undefined;
+  try {
+    return await readFile(file, "utf8");
+  } catch (error) {
+    throw new Error(`can't read ${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
-/** The Module whose Section is `section`; throws if no current Module has it. */
 /**
- * Throws unless `section` is one of the Guide's Sections, such as one whose
- * Module was removed; returns the Module whose Section it is, if any.
+ * The Module whose Section `section` is, or undefined for a top-level Section;
+ * throws unless it is one of the Guide's Sections, as a removed Module's isn't.
  */
-export function guideSection(target: Target, section: string): Module | undefined {
+export function sectionModule(target: Target, section: string): Module | undefined {
   if (!guideSections(target).includes(section)) {
-    throw new Error(`no Module has the Section ${section}; the Sections are ${guideSections(target).join(", ")}`);
+    throw new Error(`the Guide has no Section ${section}, as a removed Module's isn't; its Sections are ${guideSections(target).join(", ")}`);
   }
   return [...target.sectionIds].find(([, id]) => id === section)?.[0];
 }
 
-/** Whether a Section cites GitHub Evidence: a Module's Section, whose Module is `module`, or Key decisions. */
-export function drawsOnGitHub(section: string, module: Module | undefined): boolean {
-  return module !== undefined || section === KEY_DECISIONS;
+/**
+ * The GitHub Evidence one Section draws on, `module` being its Module if it
+ * is a Module's: none unless it is a Module's Section or a top-level Section
+ * that cites GitHub Evidence.
+ */
+export function sectionDiscussions(
+  repoDir: string,
+  section: string,
+  module: Module | undefined,
+  github: GitHub | undefined,
+  warnings: string[],
+): Promise<FetchedDiscussions> {
+  const draws = module !== undefined || TOP_LEVEL_SECTIONS[section]?.drawsOnGitHub === true;
+  return gitHubEvidence(repoDir, draws ? github : undefined, module ? [module] : [], warnings);
 }
 
 /** Deletes a Section's pending Proposal; returns its repo-relative path, or undefined if there was none. */
@@ -147,14 +157,9 @@ export async function clearProposal(repoDir: string, config: Config, section: st
 
 const MODULE_SECTIONS = "modules/";
 
-/** Whether a Section is a Module's, rather than a top-level one. */
-export function isModuleSection(section: string): boolean {
-  return section.startsWith(MODULE_SECTIONS);
-}
-
 /** Whether a recorded Section belongs to a Module that no longer exists; top-level Sections never do. */
 export function isRemovedModuleSection({ sectionIds }: Target, section: string): boolean {
-  return isModuleSection(section) && ![...sectionIds.values()].includes(section);
+  return !isTopLevelSection(section) && ![...sectionIds.values()].includes(section);
 }
 
 function uniqueSectionIds(modules: Module[]): Map<Module, string> {
@@ -174,11 +179,13 @@ function uniqueSectionIds(modules: Module[]): Map<Module, string> {
 async function repoEvidenceOf(repoDir: string, modules: Module[], imports: ModuleImport[]): Promise<Map<string, RepoEvidence>> {
   const items: Omit<RepoEvidence, "hash">[] = [
     {
+      kind: "repo",
       id: "graph:modules",
       label: "Modules of the repo",
       text: modules.map((m) => `${m.name} (${m.path})`).join("\n"),
     },
     {
+      kind: "repo",
       id: "graph:imports",
       label: "Import graph between Modules",
       text: imports.length > 0 ? imports.map(({ from, to }) => `${from} imports ${to}`).join("\n") : "No Module imports another.",
@@ -187,8 +194,8 @@ async function repoEvidenceOf(repoDir: string, modules: Module[], imports: Modul
   const packageJson = join(repoDir, "package.json");
   if (existsSync(packageJson)) {
     const text = (await readFile(packageJson, "utf8")).replace(/\r\n?/g, "\n");
-    const source = { file: "package.json", startLine: 1, endLine: text.trimEnd().split("\n").length };
-    items.push({ id: "file:package.json", label: "package.json", text, source });
+    const lines = { file: "package.json", startLine: 1, endLine: text.trimEnd().split("\n").length };
+    items.push({ kind: "repo", id: "file:package.json", label: "package.json", text, lines });
   }
   return new Map(items.map((item) => [item.id, { ...item, hash: contentHash(item.text) }]));
 }

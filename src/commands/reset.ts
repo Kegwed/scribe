@@ -1,11 +1,8 @@
 import type { Adapters } from "../adapters.ts";
-import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR } from "../manifest.ts";
 import { emptyReport, sectionWriter, type WriteReport } from "../section-writer.ts";
-import { clearProposal, drawsOnGitHub, openTarget, readSection, guideSection,sectionPath } from "../target.ts";
+import { clearProposal, sectionModule, openTarget, readSection, sectionDiscussions, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
-
-export interface ResetOptions {}
 
 export interface ResetResult extends WriteReport {
   /** The Section's pending Proposal, deleted because the Section is regenerated. */
@@ -19,18 +16,19 @@ export interface ResetResult extends WriteReport {
 export async function reset(
   repoDir: string,
   section: string,
-  _options: ResetOptions,
   { llm, github }: Adapters,
 ): Promise<ResetResult> {
   const target = await openTarget(repoDir);
-  const module = guideSection(target, section);
+  const module = sectionModule(target, section);
+  const existing = await readSection(repoDir, sectionPath(target.config, section));
   await gitIgnore(repoDir, CACHE_DIR);
   const result: ResetResult = emptyReport();
-  const discussions = github && drawsOnGitHub(section, module) ? await gitHubEvidence(repoDir, github, module ? [module] : [], result.warnings) : undefined;
+  const { discussions, saveCache } = await sectionDiscussions(repoDir, section, module, github, result.warnings);
+  await saveCache();
 
-  const existing = await readSection(repoDir, sectionPath(target.config, section));
-  // An adopted record carries Unsupported Claims, so it is replaced even if the text comes out the same.
-  const previous = target.manifest.sections[section]?.unsupportedClaims ? undefined : existing;
+  // An adopted record can carry Unsupported Claims, so it is replaced even if the text comes out the same.
+  const record = target.manifest.sections[section];
+  const previous = record?.adopted || record?.unsupportedClaims ? undefined : existing;
   await sectionWriter(repoDir, target, llm, result, discussions).write(section, previous);
   const clearedProposal = await clearProposal(repoDir, target.config, section);
   if (clearedProposal) result.clearedProposal = clearedProposal;

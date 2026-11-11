@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { CodeSymbol } from "./analyser.ts";
 import { contentHash } from "./hash.ts";
 import type { Module } from "./modules.ts";
-import type { FileEvidence } from "./section-writer.ts";
+import type { Evidence, FileEvidence } from "./evidence.ts";
 
 /**
  * One heading's part of an existing doc in the Target repo, such as the README
@@ -105,14 +105,16 @@ function slugOf(heading: string): string {
   return heading.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").trim().replace(/\s/g, "-");
 }
 
-/**
- * The passages that concern a Module: those naming its directory or a symbol
- * it exports. Others would only crowd the prompt.
- */
+/** The passages that concern a Module: those naming its directory or a symbol it exports. */
 export function docsAbout(module: Module, symbols: CodeSymbol[], docs: DocEvidence[]): DocEvidence[] {
   const names = new Set(symbols.filter((s) => s.module === module.path).flatMap((s) => s.exportedAs).filter((n) => n !== "default"));
   return docs.filter(({ text }) =>
     (module.path !== "." && text.includes(module.path)) ||
     [...names].some((name) => new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$")}(?![\\w$])`).test(text)),
   );
+}
+
+/** Whether a piece of Evidence is a passage of an existing doc. */
+export function isDoc(e: Evidence): e is DocEvidence {
+  return e.kind === "doc";
 }

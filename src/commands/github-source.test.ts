@@ -108,6 +108,27 @@ describe("the GitHub Source", () => {
     expect(github.calls).not.toContain("pullRequest 2");
   });
 
+  it("never puts the @handles or email addresses in GitHub discussion into a prompt", async () => {
+    const repo = createFixtureRepo(TARGET);
+    const github = fakeGitHub([{
+      number: 12,
+      files: ["src/a/a.ts"],
+      body: "Thanks @alice-b for the idea, cc @bob.\n\nCo-authored-by: Carol Doe <carol@example.com>",
+      comments: ["@dave agreed; mail eve@example.org. Pin `@types/node` and keep `@deprecated` on a."],
+      linkedIssues: [{ number: 7, title: "Reported by @frank", body: "See @acme/core." }],
+    }]);
+    const llm = scriptedLlm({ paragraphs: [] });
+
+    await generate(repo.dir, {}, { llm, github });
+
+    const prompt = writePrompts(llm)[0]!;
+    for (const person of ["alice", "bob", "Carol", "carol@", "dave", "eve@", "frank"]) expect(prompt).not.toContain(person);
+    expect(prompt).toContain("Thanks someone for the idea, cc someone.");
+    expect(prompt).toContain("`@types/node`");
+    expect(prompt).toContain("`@deprecated`");
+    expect(prompt).toContain("@acme/core");
+  });
+
   describe("when it is active", () => {
     const token = () => "a-token";
     const noToken = () => undefined;
@@ -207,6 +228,38 @@ describe("the GitHub Source", () => {
       await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [] }), github });
 
       expect(github.calls.sort()).toEqual(["pullRequest 1", "pullRequest 3", "pullRequests"]);
+    });
+
+    it("caches nothing from GitHub when generate is declined", async () => {
+      const repo = createFixtureRepo(TARGET);
+
+      const result = await generate(repo.dir, { confirm: async () => false }, { llm: scriptedLlm("unused"), github: fakeGitHub(PULLS) });
+
+      expect(result.declined).toBe(true);
+      expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
+    });
+
+    it("caches nothing from GitHub when update is declined", async () => {
+      const repo = createFixtureRepo(TARGET);
+      await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] }) });
+      repo.commit({ "src/a/a.ts": "export const a = 2;\n" }, "change A");
+      const files = () => repo.git("status", "--porcelain", "--untracked-files=all", "--ignored");
+      const before = files();
+
+      const result = await update(repo.dir, { confirm: async () => false }, { llm: scriptedLlm("unused"), github: fakeGitHub(PULLS) });
+
+      expect(result.declined).toBe(true);
+      expect(files()).toBe(before);
+    });
+
+    it("caches GitHub's answers once a run is confirmed", async () => {
+      const repo = createFixtureRepo(TARGET);
+      await generate(repo.dir, { confirm: async () => true }, { llm: scriptedLlm({ paragraphs: [] }), github: fakeGitHub(PULLS) });
+
+      const github = fakeGitHub(PULLS);
+      await generate(repo.dir, { confirm: async () => false }, { llm: scriptedLlm("unused"), github });
+
+      expect(github.calls).toEqual([]);
     });
 
     it("never caches a pull request it can't use", async () => {

@@ -8,6 +8,7 @@ import { type Module, moduleOf } from "./modules.ts";
 
 /** One item of GitHub discussion a Claim can cite: a pull request's description, a review comment, or a linked issue. */
 export interface GitHubEvidence {
+  kind: "github";
   /** `github:pr/<n>`, `github:pr/<n>/comment/<id>` or `github:issue/<n>`. */
   id: string;
   /** How a citation names it, such as "PR #12, review comment". */
@@ -41,28 +42,37 @@ export interface Discussions {
 
 export const NO_DISCUSSIONS: Discussions = { byModule: new Map(), decisions: [] };
 
+/** GitHub Evidence fetched for a run, with what GitHub answered not yet in the Target repo's cache. */
+export interface FetchedDiscussions {
+  discussions: Discussions;
+  /** Writes GitHub's validated answers to the cache; a run calls it only once it goes ahead, so a declined run changes no files. */
+  saveCache(): Promise<void>;
+}
+
 /**
  * GitHub Evidence for each Module: the discussion on the merged pull requests
  * that touched its files, and the issues they link to, from the
- * highest-ranked pull requests only. If GitHub fails, there is none, and
- * `warnings` says why, so Scribe carries on with its other Sources.
+ * highest-ranked pull requests only. There is none without `github`. If
+ * GitHub fails, there is none either, and `warnings` says why, so Scribe
+ * carries on with its other Sources.
  */
 export async function gitHubEvidence(
   repoDir: string,
-  github: GitHub,
+  github: GitHub | undefined,
   modules: Module[],
   warnings: string[],
-): Promise<Discussions> {
+): Promise<FetchedDiscussions> {
+  if (!github) return { discussions: NO_DISCUSSIONS, saveCache: async () => {} };
+  const cached = cachedGitHub(repoDir, github);
   try {
-    return await rankedEvidence(repoDir, github, modules);
+    return { discussions: await rankedEvidence(cached, modules), saveCache: cached.save };
   } catch (error) {
     warnings.push(`GitHub skipped, so no pull requests or issues are cited: ${error instanceof Error ? error.message : String(error)}`);
-    return NO_DISCUSSIONS;
+    return { discussions: NO_DISCUSSIONS, saveCache: cached.save };
   }
 }
 
-async function rankedEvidence(repoDir: string, github: GitHub, modules: Module[]): Promise<Discussions> {
-  const cached = cachedGitHub(repoDir, github);
+async function rankedEvidence(cached: GitHub, modules: Module[]): Promise<Discussions> {
   const merged = (await cached.pullRequests()).filter((pr) => pr.mergedAt !== null);
   const rank = ranking(merged);
   const chosen = new Map<string, PullRequestSummary[]>(modules.map((m) => [m.path, []]));
@@ -91,25 +101,32 @@ async function rankedEvidence(repoDir: string, github: GitHub, modules: Module[]
  * `github` answering from the Target repo's cache where it can. The list is
  * cached per commit: a pull request merged since was merged upstream of the
  * code being documented. A pull request is cached until it is next updated.
- * Responses are cached only once validated, so a bad one is never replayed.
+ * Responses are cached only once validated, so a bad one is never replayed,
+ * and only when `save` is called.
  */
-function cachedGitHub(repoDir: string, github: GitHub): GitHub {
+function cachedGitHub(repoDir: string, github: GitHub): GitHub & { save(): Promise<void> } {
   const sha = git(repoDir, "rev-parse", "HEAD");
   const updatedAt = new Map<number, string>();
+  const unsaved = new Map<string, unknown>();
 
   async function cached<T>(name: string | undefined, fetch: () => Promise<T>, valid: (value: unknown) => boolean): Promise<T> {
     const file = name && join(repoDir, CACHE_DIR, "github", `${name}.json`);
+    if (file && unsaved.has(file)) return unsaved.get(file) as T;
     if (file && existsSync(file)) return JSON.parse(await readFile(file, "utf8"));
     const value = await fetch();
     if (!valid(value)) throw new Error(`malformed GitHub response: ${JSON.stringify(value)}`);
-    if (file) {
-      await mkdir(dirname(file), { recursive: true });
-      await writeFile(file, JSON.stringify(value));
-    }
+    if (file) unsaved.set(file, value);
     return value;
   }
 
   return {
+    async save() {
+      for (const [file, value] of unsaved) {
+        await mkdir(dirname(file), { recursive: true });
+        await writeFile(file, JSON.stringify(value));
+      }
+      unsaved.clear();
+    },
     async pullRequests() {
       const list = await cached(sha && `pulls-${sha}`, () => github.pullRequests(), isSummaryList);
       for (const pr of list) updatedAt.set(pr.number, pr.updatedAt);
@@ -150,12 +167,33 @@ function ranking(merged: PullRequestSummary[]): (pr: PullRequestSummary) => numb
 }
 
 function discussionOf(pr: PullRequest): GitHubEvidence[] {
-  const item = (id: string, label: string, url: string, text: string) => ({ id: `${GITHUB_EVIDENCE}${id}`, label, url, text, hash: contentHash(text) });
+  const item = (id: string, label: string, url: string, raw: string) => {
+    const text = withoutPeople(raw);
+    return { kind: "github" as const, id: `${GITHUB_EVIDENCE}${id}`, label, url, text, hash: contentHash(text) };
+  };
   return [
     item(`pr/${pr.number}`, `PR #${pr.number}`, pr.url, `${pr.title}\n\n${pr.body}`.trim()),
     ...pr.comments.map((c) => item(`pr/${pr.number}/comment/${c.id}`, `PR #${pr.number}, review comment`, c.url, c.body)),
     ...pr.linkedIssues.map((i) => item(`issue/${i.number}`, `Issue #${i.number}`, i.url, `${i.title}\n\n${i.body}`.trim())),
   ];
+}
+
+/**
+ * GitHub text with the people it names taken out before any prompt sees it,
+ * so a Section can't name them whatever the model does: @mentions read
+ * "someone", email addresses "an email address", and trailer lines such as
+ * Co-authored-by are dropped. Code spans and blocks are kept as they are, and
+ * so is an @ followed by a slash, which names a package scope or a team.
+ */
+function withoutPeople(text: string): string {
+  return text
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/)
+    .map((part, i) => i % 2 === 1 ? part : part
+      .replace(/^[ \t]*(?:Co-authored-by|Signed-off-by|Reviewed-by|Reported-by|Acked-by|Tested-by):.*(?:\r?\n|$)/gim, "")
+      .replace(/[\w.+-]+@[A-Za-z\d-]+(?:\.[A-Za-z\d-]+)+/g, "an email address")
+      .replace(/(?<![\w@./`])@[A-Za-z\d](?:[A-Za-z\d]|-(?=[A-Za-z\d])){0,38}(?![\w/-])/g, "someone"))
+    .join("")
+    .trim();
 }
 
 /** A pull request as listed, with what Scribe needs to choose among them. */

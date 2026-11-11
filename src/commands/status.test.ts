@@ -106,6 +106,20 @@ describe("status", () => {
     ]);
   });
 
+  it("reports Getting started, Conventions and Key decisions Frozen once edited, and missing once gone", async () => {
+    const repo = await generated();
+    repo.commit({ "docs/guide/getting-started.md": "# Getting started\n\nMine.\n", "docs/guide/key-decisions.md": "# Key decisions\n\nMine.\n" });
+    repo.git("rm", "--quiet", "docs/guide/conventions.md");
+
+    const sections = await sectionsBelowTop(repo.dir);
+
+    expect(sections.slice(2)).toEqual([
+      expect.objectContaining({ section: "getting-started", frozen: true, missing: false, stale: false }),
+      expect.objectContaining({ section: "conventions", frozen: false, missing: true, stale: false }),
+      expect.objectContaining({ section: "key-decisions", frozen: true, missing: false, stale: false }),
+    ]);
+  });
+
   it("reports a Section both Frozen and Stale", async () => {
     const repo = await generated();
     repo.commit({ "docs/guide/modules/src-a.md": "# A\n\nMy words.\n", "src/a/a.ts": "export function a() {\n  return 2;\n}\n" });
@@ -266,6 +280,32 @@ describe("status", () => {
       expect(await topLevel(repo.dir)).toEqual([
         expect.objectContaining({ section: "architecture", added: false }),
         { section: "overview", file: "docs/guide/overview.md", added: true, removed: false, missing: false, frozen: false, stale: false, changedEvidence: [] },
+      ]);
+    });
+
+    it("reports them Frozen once a human edits them, and Frozen and Stale once what they cite changes too", async () => {
+      const repo = await layered();
+      repo.commit({ "docs/guide/overview.md": "# Overview\n\nMine.\n", "docs/guide/architecture.md": "# Architecture\n\nMine.\n" });
+      expect(await topLevel(repo.dir)).toEqual([
+        expect.objectContaining({ section: "overview", frozen: true, stale: false }),
+        expect.objectContaining({ section: "architecture", frozen: true, stale: false }),
+      ]);
+
+      repo.commit({ "package.json": JSON.stringify({ name: "app", description: "Counts twice." }) });
+
+      expect(await topLevel(repo.dir)).toEqual([
+        expect.objectContaining({ section: "overview", frozen: true, stale: true }),
+        expect.objectContaining({ section: "architecture", frozen: true, stale: false }),
+      ]);
+    });
+
+    it("reports one whose file is gone missing, neither Frozen nor added", async () => {
+      const repo = await layered();
+      repo.git("rm", "--quiet", "docs/guide/architecture.md");
+
+      expect(await topLevel(repo.dir)).toEqual([
+        expect.objectContaining({ section: "overview", missing: false }),
+        expect.objectContaining({ section: "architecture", missing: true, frozen: false, added: false }),
       ]);
     });
 

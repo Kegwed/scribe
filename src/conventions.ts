@@ -6,7 +6,7 @@ import type { CodeSymbol } from "./analyser.ts";
 import type { DocEvidence } from "./docs.ts";
 import { contentHash } from "./hash.ts";
 import type { Module } from "./modules.ts";
-import type { FileEvidence } from "./section-writer.ts";
+import type { FileEvidence } from "./evidence.ts";
 
 /** The Conventions Section's id, which is also its file's path in the Guide, without the extension. */
 export const CONVENTIONS = "conventions";
@@ -34,14 +34,69 @@ export async function lintConfigEvidence(repoDir: string, guideDir: string): Pro
     .sort();
   const evidence: FileEvidence[] = [];
   for (const file of files) {
-    const kind = LINT_CONFIGS.find(({ file: pattern }) => pattern.test(file.split("/").at(-1)!));
-    if (!kind) continue;
+    const fileName = file.split("/").at(-1)!;
+    if (fileName === "package.json") {
+      evidence.push(...packageJsonConfig(file, await readFile(join(repoDir, file), "utf8")));
+      continue;
+    }
+    const config = LINT_CONFIGS.find(({ file: pattern }) => pattern.test(fileName));
+    if (!config) continue;
     const lines = (await readFile(join(repoDir, file), "utf8")).replace(/\r\n?/g, "\n").replace(/\n+$/, "").split("\n");
     const text = lines.join("\n");
     if (text.trim() === "") continue;
-    evidence.push({ id: file, name: kind.name, file, text, hash: contentHash(text), startLine: 1, endLine: lines.length });
+    evidence.push({ kind: "config", id: file, name: config.name, file, text, hash: contentHash(text), startLine: 1, endLine: lines.length });
   }
   return evidence;
+}
+
+/** What each lint or format config kept under a key of package.json is called in a citation, by its key. */
+const PACKAGE_JSON_CONFIGS: Record<string, string> = {
+  eslintConfig: "ESLint config",
+  prettier: "Prettier config",
+  stylelint: "Stylelint config",
+};
+
+/**
+ * One piece of Evidence per lint or format config kept under a key of a
+ * package.json, its id `<file>#<key>`. Its text is the key's value, so the
+ * rest of package.json can change without making Conventions Stale.
+ */
+function packageJsonConfig(file: string, content: string): FileEvidence[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return [];
+  }
+  if (typeof parsed !== "object" || parsed === null) return [];
+  const lines = content.replace(/\r\n?/g, "\n").split("\n");
+  return Object.entries(PACKAGE_JSON_CONFIGS).flatMap(([key, name]) => {
+    if (!Object.hasOwn(parsed, key)) return [];
+    const text = `${JSON.stringify(key)}: ${JSON.stringify((parsed as Record<string, unknown>)[key], null, 2)}`;
+    const start = Math.max(0, lines.findIndex((line) => line.includes(`${JSON.stringify(key)}:`)));
+    return [{ kind: "config" as const, id: `${file}#${key}`, name, file, text, hash: contentHash(text), startLine: start + 1, endLine: valueEnd(lines, start) + 1 }];
+  });
+}
+
+/** The index of the line a JSON value starting on line `start` ends on, found by matching its brackets outside strings. */
+function valueEnd(lines: string[], start: number): number {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < lines.length; i++) {
+    const line = lines[i]!;
+    // The key itself is a string, so scanning starts after its colon.
+    for (let j = i === start ? line.indexOf(":") + 1 : 0; j < line.length; j++) {
+      const c = line[j];
+      if (inString) {
+        if (c === "\\") j++;
+        else if (c === '"') inString = false;
+      } else if (c === '"') inString = true;
+      else if (c === "{" || c === "[") depth++;
+      else if (c === "}" || c === "]") depth--;
+    }
+    if (depth <= 0 && !inString) return i;
+  }
+  return lines.length - 1;
 }
 
 /** How many of each Module's exported symbols Conventions is shown, as samples of how the code is written. */
@@ -63,5 +118,5 @@ export function conventionsEvidence(
 
 /** Whether Conventions has anything to be written from: code samples alone show no convention. */
 export function hasConventions(evidence: FileEvidence[]): boolean {
-  return evidence.some((e) => !("exportedAs" in e));
+  return evidence.some((e) => e.kind !== "symbol");
 }

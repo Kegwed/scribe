@@ -21,8 +21,10 @@ export interface SectionRecord {
   evidence: EvidenceRecord[];
   /** Hash of the content Scribe last wrote, or that a human's adopted Section had. */
   contentHash: string;
-  /** Claims in an adopted Section for which the verifier found no Evidence; kept in the Section, never deleted. */
+  /** Claims in an adopted Section for which the verifier found no Evidence; kept in the Section, never deleted, through every revision. */
   unsupportedClaims?: string[];
+  /** Set when a human's text was adopted as it is, so its footnotes are the human's and don't follow `evidence`; absent once Scribe writes the Section again. */
+  adopted?: true;
   /** Where existing docs contradicted the code when Scribe last wrote the Section; absent if nowhere. */
   drift?: DriftRecord[];
 }

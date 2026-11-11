@@ -1,17 +1,10 @@
 import type { Adapters } from "../adapters.ts";
 import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR, isFrozen, recordedDrift, saveManifest } from "../manifest.ts";
-import { type Confirm, confirmed, type CostEstimate, emptyReport, estimateRun, sectionWriter, type WriteReport } from "../section-writer.ts";
+import { confirmed, type CostEstimate, estimateRun, type RunOptions } from "../estimate.ts";
+import { emptyReport, sectionWriter, type WriteReport } from "../section-writer.ts";
 import { allEvidence, changedEvidence, guideSections, isRemovedModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
-
-export interface UpdateOptions {
-  /**
-   * Asked before any LLM call, unless the run costs nothing; the run stops
-   * there, changing no files, unless it answers true. Without it the run goes ahead.
-   */
-  confirm?: Confirm;
-}
 
 export interface UpdateResult extends WriteReport {
   /** Sections whose Module no longer exists: their records are dropped, their files left for a human to delete. */
@@ -37,12 +30,12 @@ type Planned =
  */
 export async function update(
   repoDir: string,
-  { confirm }: UpdateOptions,
+  { confirm }: RunOptions,
   { llm, github }: Adapters,
 ): Promise<UpdateResult> {
   const target = await openTarget(repoDir);
   const report = emptyReport();
-  const discussions = github && (await gitHubEvidence(repoDir, github, target.modules, report.warnings));
+  const { discussions, saveCache } = await gitHubEvidence(repoDir, github, target.modules, report.warnings);
   const writer = sectionWriter(repoDir, target, llm, report, discussions);
 
   const { sections } = target.manifest;
@@ -72,6 +65,7 @@ export async function update(
   if (!(await confirmed(estimate, confirm))) return { ...report, removed: [], proposals: [], estimate, declined: true };
 
   await gitIgnore(repoDir, CACHE_DIR);
+  await saveCache();
   for (const { section } of removed) delete sections[section];
   if (removed.length > 0) await saveManifest(repoDir, target.manifest);
 
