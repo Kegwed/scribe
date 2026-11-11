@@ -1,13 +1,24 @@
 import type { Adapters } from "../adapters.ts";
 import { gitHubEvidence } from "../github.ts";
 import { CACHE_DIR, isFrozen } from "../manifest.ts";
-import { emptyReport, sectionWriter, type WriteReport } from "../section-writer.ts";
+import type { Module } from "../modules.ts";
+import { type Confirm, confirmed, type CostEstimate, emptyReport, sectionWriter, totalCost, type WriteReport } from "../section-writer.ts";
 import { openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
 
-export interface GenerateOptions {}
+export interface GenerateOptions {
+  /**
+   * Asked before any LLM call, unless the run costs nothing; the run stops
+   * there, changing no files, unless it answers true. Without it the run goes ahead.
+   */
+  confirm?: Confirm;
+}
 
-export type GenerateResult = WriteReport;
+export interface GenerateResult extends WriteReport {
+  estimate: CostEstimate;
+  /** The estimate was declined, so nothing was written. */
+  declined: boolean;
+}
 
 /**
  * Writes one Section per Module, each Claim citing the code symbols it rests
@@ -16,23 +27,26 @@ export type GenerateResult = WriteReport;
  */
 export async function generate(
   repoDir: string,
-  _options: GenerateOptions,
+  { confirm }: GenerateOptions,
   { llm, github }: Adapters,
 ): Promise<GenerateResult> {
   const target = await openTarget(repoDir);
-  await gitIgnore(repoDir, CACHE_DIR);
-  const result = emptyReport();
-  const discussions = github && (await gitHubEvidence(repoDir, github, target.modules, result.warnings));
-  const writer = sectionWriter(repoDir, target, llm, result, discussions);
+  const report = emptyReport();
+  const discussions = github && (await gitHubEvidence(repoDir, github, target.modules, report.warnings));
+  const writer = sectionWriter(repoDir, target, llm, report, discussions);
 
+  const planned: { module: Module; existing: string | undefined }[] = [];
   for (const module of target.modules) {
     const section = target.sectionIds.get(module)!;
     const existing = await readSection(repoDir, sectionPath(target.config, section));
-    if (isFrozen(existing, target.manifest.sections[section])) {
-      result.frozen.push(section);
-      continue;
-    }
-    await writer.write(module, existing);
+    if (isFrozen(existing, target.manifest.sections[section])) report.frozen.push(section);
+    else planned.push({ module, existing });
   }
-  return result;
+
+  const estimate = totalCost(planned.map(({ module, existing }) => writer.estimate(module, existing)));
+  if (!(await confirmed(estimate, confirm))) return { ...report, estimate, declined: true };
+
+  await gitIgnore(repoDir, CACHE_DIR);
+  for (const { module, existing } of planned) await writer.write(module, existing);
+  return { ...report, estimate, declined: false };
 }
