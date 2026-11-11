@@ -1,6 +1,6 @@
 import type { Adapters } from "../adapters.ts";
 import { gitHubEvidence } from "../github.ts";
-import { CACHE_DIR, isFrozen, saveManifest } from "../manifest.ts";
+import { CACHE_DIR, isFrozen, recordedDrift, saveManifest } from "../manifest.ts";
 import { type Confirm, confirmed, type CostEstimate, emptyReport, estimateRun, sectionWriter, type WriteReport } from "../section-writer.ts";
 import { allEvidence, changedEvidence, guideSections, isRemovedModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
@@ -80,5 +80,5 @@ export async function update(
     if (p.kind === "propose") proposals.push({ section: p.section, file: await writer.propose(p.section) });
     else await writer.write(p.section, p.existing, p.changed);
   }
-  return { ...report, removed, proposals, estimate, declined: false };
+  return { ...report, removed, proposals, estimate, declined: false, drift: recordedDrift(target.manifest) };
 }

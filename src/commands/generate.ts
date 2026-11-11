@@ -1,6 +1,6 @@
 import type { Adapters } from "../adapters.ts";
 import { gitHubEvidence } from "../github.ts";
-import { CACHE_DIR, isFrozen } from "../manifest.ts";
+import { CACHE_DIR, isFrozen, recordedDrift } from "../manifest.ts";
 import { type Confirm, confirmed, type CostEstimate, emptyReport, estimateRun, sectionWriter, type WriteReport } from "../section-writer.ts";
 import { guideSections, openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
@@ -48,5 +48,5 @@ export async function generate(
 
   await gitIgnore(repoDir, CACHE_DIR);
   for (const { section, existing } of planned) await writer.write(section, existing);
-  return { ...report, estimate, declined: false };
+  return { ...report, estimate, declined: false, drift: recordedDrift(target.manifest) };
 }

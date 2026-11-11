@@ -6,9 +6,5 @@
   "a978b2ca6f8d248525b7fa257e07df1e0378f8eaefa3699f52b1db74a5758f4c": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Greeting Module exports greet, which returns a greeting that includes the given name.\",\"evidence\":[\"src/greeting/greet.ts#greet\"]}]}]}",
   "61af2a145cdc1f7c5f3262da9e0c3acbe8253eecac61bc7069d6435276c17e74": "{\"confirmed\":true,\"reason\":\"The cited symbol shows everything the Claim states.\"}",
   "8397893974de089196e107a9692b39df41c3dce79befb4a08eb7d569de9a7366": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The Pricing Module exports roundPrice, which rounds a price down to whole cents.\",\"evidence\":[\"src/pricing/price.ts#roundPrice\"]},{\"text\":\"It also exports the CURRENCY constant, set to \\\"EUR\\\".\",\"evidence\":[\"src/pricing/price.ts#CURRENCY\"]}]}]}",
-  "fd5b56a109f490aa30217a5e036a9115818fae2c721a5e06e083594d67ae96bb": "{\"confirmed\":true,\"reason\":\"The cited symbol shows everything the Claim states.\"}",
-  "eea25ad1f56d42666bc1b64e56335342e793cedfcf058d53e707be27a8dd6325": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The repository has two Modules: Pricing, in src/pricing, and Greeting, in src/greeting.\",\"evidence\":[\"graph:modules\"]}]}]}",
-  "bb187f7305203459ffa311d2f03a84685a571cb0ac2af271ad1be98ae4df27d1": "{\"paragraphs\":[{\"claims\":[{\"text\":\"The repository has two Modules: Pricing, in src/pricing, and Greeting, in src/greeting.\",\"evidence\":[\"graph:modules\"]},{\"text\":\"Neither Module imports the other.\",\"evidence\":[\"graph:imports\"]}]}]}",
-  "7bf2a56ea4d4c9fc348cebd1e1251225db26feb7f9976f918151e13cc0adc366": "{\"confirmed\":true,\"reason\":\"\"}",
-  "5e039e9060fce37378abe05693486ec8af6cd8d1355cc68b1c2dfe99b83f7b60": "{\"confirmed\":true,\"reason\":\"\"}"
+  "fd5b56a109f490aa30217a5e036a9115818fae2c721a5e06e083594d67ae96bb": "{\"confirmed\":true,\"reason\":\"The cited symbol shows everything the Claim states.\"}"
 }

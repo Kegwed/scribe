@@ -45,20 +45,25 @@ export function recordedLlm(name: string, { promptLimit = PROMPT_LIMIT }: { prom
  * A fake for edge cases a live model won't reliably produce. Writes answer with
  * `sections`: a list is used in turn with its last entry repeating, anything else
  * answers every write. The verifier answers from `verdicts`, keyed by a Claim's
- * text, and confirms any Claim not listed. Requests made together are answered
+ * text, and confirms any Claim not listed. Asked which Evidence backs an adopted
+ * Section's Claims, it answers from `attachments`, keyed by a Claim's text, and
+ * attaches no Evidence to any Claim not listed. Requests made together are answered
  * last first, so code that depends on the order answers arrive in fails here.
  * A summary request answers with the summary in `summaries` keyed by the
  * summarised symbol's id, or with a one-line summary naming it. `promptLimit`
- * stands in for the writing model's, so small fixtures can exceed it. Writes
- * of Overview and Architecture answer from `topLevel`, keyed by title, and
- * default to a Section with no Claims, so `sections` never scripts them.
+ * stands in for the writing model's, so small fixtures can exceed it. A search
+ * for Drift finds `drift`, by default nothing. Writes of Overview and
+ * Architecture answer from `topLevel`, keyed by title, and default to a
+ * Section with no Claims, so `sections` never scripts them.
  */
 export function scriptedLlm(
   sections: unknown,
   verdicts: Record<string, unknown> = {},
-  { promptLimit = PROMPT_LIMIT, summaries = {}, topLevel = {} }: {
+  { promptLimit = PROMPT_LIMIT, summaries = {}, attachments = {}, drift = [], topLevel = {} }: {
     promptLimit?: number;
     summaries?: Record<string, unknown>;
+    attachments?: Record<string, string[]>;
+    drift?: unknown[];
     topLevel?: Record<string, unknown>;
   } = {},
 ): RecordedLlm {
@@ -80,10 +85,17 @@ export function scriptedLlm(
       const title = request.prompt.match(/^Section: (.+)/)?.[1];
       if (isSectionWrite(request) && title !== undefined) return asResponseText(topLevel[title] ?? { paragraphs: [] });
       if (isSectionWrite(request)) return asResponseText(writes[Math.min(written++, writes.length - 1)]);
+      if ("attachments" in ((request.schema.properties as object | undefined) ?? {})) {
+        const claims = [...request.prompt.matchAll(/<claim index="(\d+)">\n(.*)\n<\/claim>/g)];
+        return asResponseText({
+          attachments: claims.map(([, index, text]) => ({ claim: Number(index), evidence: attachments[text!] ?? [] })),
+        });
+      }
       if (request.system === SUMMARY_SYSTEM) {
         const id = request.prompt.match(/<symbol id="([^"]*)"/)?.[1] ?? "";
         return asResponseText({ summary: id in summaries ? summaries[id] : `Summary of ${id}.` });
       }
+      if ("drift" in ((request.schema.properties ?? {}) as object)) return asResponseText({ drift });
       const claim = Object.keys(verdicts).find((key) => request.prompt.includes(key));
       return asResponseText(claim === undefined ? { confirmed: true, reason: "" } : verdicts[claim]);
     },

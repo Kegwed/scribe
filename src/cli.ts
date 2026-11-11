@@ -1,6 +1,8 @@
 #!/usr/bin/env node
+import { adopt } from "./commands/adopt.ts";
 import { generate } from "./commands/generate.ts";
 import { init } from "./commands/init.ts";
+import { reset } from "./commands/reset.ts";
 import { status } from "./commands/status.ts";
 import { update } from "./commands/update.ts";
 import { CONFIG_FILE } from "./config.ts";
@@ -8,10 +10,11 @@ import { createInterface } from "node:readline";
 import type { Adapters } from "./adapters.ts";
 import { connectGitHub } from "./github.ts";
 import { claudeLlm } from "./llm.ts";
+import type { DriftReport } from "./manifest.ts";
 import type { Confirm, WriteReport } from "./section-writer.ts";
 import { isModuleSection } from "./target.ts";
 
-const USAGE = "Usage: scribe <command> [--yes]\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module, then Overview and Architecture from them\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules and pending Proposals; exits 1 unless only Frozen Sections need attention\n\ngenerate and update print a cost estimate and ask before calling the LLM; --yes skips asking.";
+const USAGE = "Usage: scribe <command> [--yes]\n\nCommands:\n  init      Detect Modules and write config and manifest\n  generate  Write a cited Section per Module, then Overview and Architecture from them\n  update    Regenerate Stale Sections, write Sections for added Modules and Proposals for Frozen, Stale Sections\n  status    Report Stale, Frozen and missing Sections, added or removed Modules, pending Proposals, Unsupported Claims and Drift between existing docs and the code; exits 1 unless only Frozen Sections, Unsupported Claims or Drift need attention\n  adopt <section>  Take a Frozen Section's text as the new baseline, recording its Evidence and Unsupported Claims\n  reset <section>  Discard a Section's human edits and regenerate it\n\ngenerate and update print a cost estimate and ask before calling the LLM; --yes skips asking.";
 
 /** Prints a run's estimate, then asks to go ahead unless `yes`; no answer, as when stdin closes, declines. */
 function confirmer(yes: boolean): Confirm {
@@ -57,8 +60,14 @@ function adapters(): Adapters {
 }
 
 async function main(argv: string[]): Promise<number> {
-  const [command, ...flags] = argv;
+  const [command, ...rest] = argv;
+  const flags = rest.filter((arg) => arg.startsWith("-"));
+  const [section] = rest.filter((arg) => !arg.startsWith("-"));
   const yes = flags.includes("--yes") || flags.includes("-y");
+  if ((command === "adopt" || command === "reset") && section === undefined) {
+    console.error(`Usage: scribe ${command} <section>\n\nThe Sections are named as scribe status lists them, such as modules/src-core.`);
+    return 1;
+  }
   switch (command) {
     case "init": {
       const { modules, publicSurface, warnings } = await init(process.cwd());
@@ -74,17 +83,18 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "generate": {
-      const { declined, droppedClaims, frozen, reduced, warnings } = await generate(process.cwd(), { confirm: confirmer(yes) }, adapters());
+      const { declined, droppedClaims, frozen, reduced, warnings, drift } = await generate(process.cwd(), { confirm: confirmer(yes) }, adapters());
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
       if (declined) return cancelled();
       printReduced(reduced);
       for (const { section, text, reason } of droppedClaims) console.log(`Dropped from ${section}: ${text} (${reason})`);
+      for (const line of driftLines(drift)) console.log(line);
       console.log("Guide generated.");
       return 0;
     }
     case "update": {
-      const { declined, droppedClaims, frozen, proposals, reduced, removed, warnings } = await update(process.cwd(), { confirm: confirmer(yes) }, adapters());
+      const { declined, droppedClaims, frozen, proposals, reduced, removed, warnings, drift } = await update(process.cwd(), { confirm: confirmer(yes) }, adapters());
       for (const warning of warnings) console.error(`warning: ${warning}`);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
       if (declined) return cancelled();
@@ -94,11 +104,12 @@ async function main(argv: string[]): Promise<number> {
         console.log(`Dropped from ${proposal ? `the Proposal for ${section}` : section}: ${text} (${reason})`);
       }
       for (const { section, file } of removed) console.log(`Module removed: ${section}; delete ${file} if it is no longer wanted.`);
+      for (const line of driftLines(drift)) console.log(line);
       console.log("Guide updated.");
       return 0;
     }
     case "status": {
-      const { sections, proposals } = await status(process.cwd());
+      const { sections, proposals, unsupportedClaims, drift } = await status(process.cwd());
       const attention = sections.filter((s) => s.added || s.removed || s.missing || s.frozen || s.stale);
       for (const { section, added, removed, missing, frozen, stale, changedEvidence } of attention) {
         const label = added && !isModuleSection(section) ? "Not written yet"
@@ -112,13 +123,37 @@ async function main(argv: string[]): Promise<number> {
         console.log(`${label}: ${section}${changes}`);
       }
       for (const { section, file } of proposals) console.log(`Proposal to merge by hand: ${section} (${file})`);
-      if (attention.length === 0 && proposals.length === 0) console.log(`All ${sections.length} Section${sections.length === 1 ? "" : "s"} current.`);
+      for (const { section, text } of unsupportedClaims) console.log(`Unsupported Claim in ${section}: ${text}`);
+      for (const line of driftLines(drift)) console.log(line);
+      if (attention.length === 0 && proposals.length === 0 && unsupportedClaims.length === 0 && drift.length === 0) console.log(`All ${sections.length} Section${sections.length === 1 ? "" : "s"} current.`);
       return proposals.length > 0 || sections.some((s) => s.added || s.removed || s.missing || s.stale) ? 1 : 0;
+    }
+    case "adopt": {
+      const { unsupportedClaims, clearedProposal, warnings } = await adopt(process.cwd(), section!, {}, adapters());
+      for (const warning of warnings) console.error(`warning: ${warning}`);
+      for (const { text } of unsupportedClaims) console.log(`Unsupported Claim, kept: ${text}`);
+      if (clearedProposal) console.log(`Proposal deleted: ${clearedProposal}`);
+      console.log(`Adopted ${section}.`);
+      return 0;
+    }
+    case "reset": {
+      const { droppedClaims, warnings, clearedProposal } = await reset(process.cwd(), section!, {}, adapters());
+      for (const warning of warnings) console.error(`warning: ${warning}`);
+      for (const { text, reason } of droppedClaims) console.log(`Dropped from ${section}: ${text} (${reason})`);
+      if (clearedProposal) console.log(`Proposal deleted: ${clearedProposal}`);
+      console.log(`Reset ${section}.`);
+      return 0;
     }
     default:
       console.error(USAGE);
       return command === undefined || command === "--help" ? 0 : 1;
   }
+}
+
+/** One line per Drift, naming the Evidence on both sides; the code is treated as correct. */
+function driftLines(drift: DriftReport[]): string[] {
+  return drift.map(({ section, description, docs, code }) =>
+    `Drift: ${description} (docs: ${docs.join(", ")}; code: ${code.join(", ")}; found for ${section})`);
 }
 
 function printReduced(reduced: WriteReport["reduced"]) {
