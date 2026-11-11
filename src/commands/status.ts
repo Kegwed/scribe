@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
-import { type DriftReport, driftReport, isFrozen } from "../manifest.ts";
+import { type DriftReport, isFrozen, recordedDrift } from "../manifest.ts";
 import { changedEvidence, isRemovedModuleSection, openTarget, PROPOSAL_SUFFIX, proposalPath, readSection, sectionPath } from "../target.ts";
 
 export interface SectionStatus {
@@ -59,8 +59,7 @@ export async function status(repoDir: string): Promise<StatusResult> {
     const frozen = isFrozen(await readSection(repoDir, file), undefined);
     return { section, file, added: !frozen, removed: false, missing: false, frozen, stale: false, changedEvidence: [] };
   }));
-  const drift = Object.entries(manifest.sections).flatMap(([section, record]) => (record.drift ?? []).map((d) => driftReport(section, d)));
-  return { sections: [...recorded, ...unrecorded], proposals: await pendingProposals(repoDir, config), drift };
+  return { sections: [...recorded, ...unrecorded], proposals: await pendingProposals(repoDir, config), drift: recordedDrift(manifest) };
 }
 
 /** Every Proposal file in the Guide, including one whose Section's Module has since been removed. */

@@ -132,9 +132,11 @@ describe("existing docs as a Source", () => {
       const repo = createFixtureRepo(CONTRADICTING);
       await generate(repo.dir, {}, { llm: llm() });
 
-      const result = await update(repo.dir, {}, { llm: llm([]) });
+      const scripted = llm([]);
+      const result = await update(repo.dir, {}, { llm: scripted });
 
-      expect(result.drift).toEqual([]);
+      expect(scripted.calls).toEqual([]);
+      expect(result.drift).toEqual([{ section: "modules/src-auth", ...DRIFT }]);
       expect((await status(repo.dir)).drift).toEqual([{ section: "modules/src-auth", ...DRIFT }]);
     });
 

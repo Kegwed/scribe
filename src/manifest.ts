@@ -40,8 +40,11 @@ export interface DriftReport {
   code: string[];
 }
 
-export function driftReport(section: string, { description, docs, code }: DriftRecord): DriftReport {
-  return { section, description, docs: docs.map((e) => e.id), code: code.map((e) => e.id) };
+/** Every Drift the manifest records, Section by Section. */
+export function recordedDrift({ sections }: Manifest): DriftReport[] {
+  return Object.entries(sections).flatMap(([section, { drift = [] }]) => drift.map(({ description, docs, code }) => ({
+    section, description, docs: docs.map((e) => e.id), code: code.map((e) => e.id),
+  })));
 }
 
 export interface Manifest {

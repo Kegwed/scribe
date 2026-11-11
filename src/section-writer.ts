@@ -5,7 +5,7 @@ import type { CodeSymbol } from "./analyser.ts";
 import { type DocEvidence, docsAbout } from "./docs.ts";
 import { contentHash } from "./hash.ts";
 import { completeCached, type Llm, MODELS } from "./llm.ts";
-import { type DriftRecord, type DriftReport, driftReport, saveManifest } from "./manifest.ts";
+import { type DriftRecord, type DriftReport, saveManifest } from "./manifest.ts";
 import type { Module } from "./modules.ts";
 import { proposalPath, readSection, sectionPath, type Target } from "./target.ts";
 
@@ -19,7 +19,7 @@ export interface WriteReport {
   frozen: string[];
   /** Problems the maintainer should fix by hand. */
   warnings: string[];
-  /** Where existing docs contradict the code, found in the Sections written; Scribe leaves the docs as they are. */
+  /** Where existing docs contradict the code, as the manifest records it once the run is done; Scribe leaves the docs as they are. */
   drift: DriftReport[];
 }
 
@@ -137,7 +137,6 @@ export function sectionWriter(repoDir: string, target: Target, llm: Llm, report:
     async write(module, existing, changedEvidence) {
       const { section, content, citedSymbols } = await compose(module, existing, changedEvidence);
       const drift = await findDrift(module);
-      report.drift.push(...drift.map((d) => driftReport(section, d)));
       const path = sectionPath(config, section);
       const evidenceRecords = citedSymbols.map(({ id, hash }) => ({ id, hash }));
       const previous = manifest.sections[section];

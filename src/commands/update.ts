@@ -1,5 +1,5 @@
 import type { Adapters } from "../adapters.ts";
-import { CACHE_DIR, isFrozen, saveManifest } from "../manifest.ts";
+import { CACHE_DIR, isFrozen, recordedDrift, saveManifest } from "../manifest.ts";
 import { emptyReport, sectionWriter, type WriteReport } from "../section-writer.ts";
 import { changedEvidence, isRemovedModuleSection, openTarget, readSection, sectionPath } from "../target.ts";
 import { gitIgnore } from "./init.ts";
@@ -51,5 +51,6 @@ export async function update(
     }
     await writer.write(module, existing, fromScratch ? undefined : changed);
   }
+  result.drift = recordedDrift(target.manifest);
   return result;
 }
