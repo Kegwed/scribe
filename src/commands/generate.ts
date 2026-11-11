@@ -36,7 +36,7 @@ export async function generate(
 ): Promise<GenerateResult> {
   const target = await openTarget(repoDir);
   const report = emptyReport();
-  const discussions = github && (await gitHubEvidence(repoDir, github, target.modules, report.warnings));
+  const { discussions, saveCache } = await gitHubEvidence(repoDir, github, target.modules, report.warnings);
   const writer = sectionWriter(repoDir, target, llm, report, discussions);
 
   const planned: { section: string; existing: string | undefined }[] = [];
@@ -50,6 +50,7 @@ export async function generate(
   if (!(await confirmed(estimate, confirm))) return { ...report, estimate, declined: true };
 
   await gitIgnore(repoDir, CACHE_DIR);
+  await saveCache();
   for (const { section, existing } of planned) await writer.write(section, existing);
   return { ...report, estimate, declined: false, drift: recordedDrift(target.manifest) };
 }

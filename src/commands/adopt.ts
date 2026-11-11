@@ -35,7 +35,8 @@ export async function adopt(
   await gitIgnore(repoDir, CACHE_DIR);
 
   const report = emptyReport();
-  const discussions = github && drawsOnGitHub(section, module) ? await gitHubEvidence(repoDir, github, module ? [module] : [], report.warnings) : undefined;
+  const { discussions, saveCache } = await gitHubEvidence(repoDir, drawsOnGitHub(section, module) ? github : undefined, module ? [module] : [], report.warnings);
+  await saveCache();
   const unsupported = await sectionWriter(repoDir, target, llm, report, discussions).adopt(section, content);
   const clearedProposal = await clearProposal(repoDir, target.config, section);
   return {

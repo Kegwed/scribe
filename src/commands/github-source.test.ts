@@ -209,6 +209,38 @@ describe("the GitHub Source", () => {
       expect(github.calls.sort()).toEqual(["pullRequest 1", "pullRequest 3", "pullRequests"]);
     });
 
+    it("caches nothing from GitHub when generate is declined", async () => {
+      const repo = createFixtureRepo(TARGET);
+
+      const result = await generate(repo.dir, { confirm: async () => false }, { llm: scriptedLlm("unused"), github: fakeGitHub(PULLS) });
+
+      expect(result.declined).toBe(true);
+      expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
+    });
+
+    it("caches nothing from GitHub when update is declined", async () => {
+      const repo = createFixtureRepo(TARGET);
+      await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] }) });
+      repo.commit({ "src/a/a.ts": "export const a = 2;\n" }, "change A");
+      const files = () => repo.git("status", "--porcelain", "--untracked-files=all", "--ignored");
+      const before = files();
+
+      const result = await update(repo.dir, { confirm: async () => false }, { llm: scriptedLlm("unused"), github: fakeGitHub(PULLS) });
+
+      expect(result.declined).toBe(true);
+      expect(files()).toBe(before);
+    });
+
+    it("caches GitHub's answers once a run is confirmed", async () => {
+      const repo = createFixtureRepo(TARGET);
+      await generate(repo.dir, { confirm: async () => true }, { llm: scriptedLlm({ paragraphs: [] }), github: fakeGitHub(PULLS) });
+
+      const github = fakeGitHub(PULLS);
+      await generate(repo.dir, { confirm: async () => false }, { llm: scriptedLlm("unused"), github });
+
+      expect(github.calls).toEqual([]);
+    });
+
     it("never caches a pull request it can't use", async () => {
       const repo = createFixtureRepo(TARGET);
       const broken = fakeGitHub(PULLS);

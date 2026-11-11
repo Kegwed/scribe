@@ -42,7 +42,7 @@ export async function update(
 ): Promise<UpdateResult> {
   const target = await openTarget(repoDir);
   const report = emptyReport();
-  const discussions = github && (await gitHubEvidence(repoDir, github, target.modules, report.warnings));
+  const { discussions, saveCache } = await gitHubEvidence(repoDir, github, target.modules, report.warnings);
   const writer = sectionWriter(repoDir, target, llm, report, discussions);
 
   const { sections } = target.manifest;
@@ -72,6 +72,7 @@ export async function update(
   if (!(await confirmed(estimate, confirm))) return { ...report, removed: [], proposals: [], estimate, declined: true };
 
   await gitIgnore(repoDir, CACHE_DIR);
+  await saveCache();
   for (const { section } of removed) delete sections[section];
   if (removed.length > 0) await saveManifest(repoDir, target.manifest);
 

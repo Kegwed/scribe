@@ -41,28 +41,37 @@ export interface Discussions {
 
 export const NO_DISCUSSIONS: Discussions = { byModule: new Map(), decisions: [] };
 
+/** GitHub Evidence fetched for a run, with what GitHub answered not yet in the Target repo's cache. */
+export interface FetchedDiscussions {
+  discussions: Discussions;
+  /** Writes GitHub's validated answers to the cache; a run calls it only once it goes ahead, so a declined run changes no files. */
+  saveCache(): Promise<void>;
+}
+
 /**
  * GitHub Evidence for each Module: the discussion on the merged pull requests
  * that touched its files, and the issues they link to, from the
- * highest-ranked pull requests only. If GitHub fails, there is none, and
- * `warnings` says why, so Scribe carries on with its other Sources.
+ * highest-ranked pull requests only. There is none without `github`. If
+ * GitHub fails, there is none either, and `warnings` says why, so Scribe
+ * carries on with its other Sources.
  */
 export async function gitHubEvidence(
   repoDir: string,
-  github: GitHub,
+  github: GitHub | undefined,
   modules: Module[],
   warnings: string[],
-): Promise<Discussions> {
+): Promise<FetchedDiscussions> {
+  if (!github) return { discussions: NO_DISCUSSIONS, saveCache: async () => {} };
+  const cached = cachedGitHub(repoDir, github);
   try {
-    return await rankedEvidence(repoDir, github, modules);
+    return { discussions: await rankedEvidence(cached, modules), saveCache: cached.save };
   } catch (error) {
     warnings.push(`GitHub skipped, so no pull requests or issues are cited: ${error instanceof Error ? error.message : String(error)}`);
-    return NO_DISCUSSIONS;
+    return { discussions: NO_DISCUSSIONS, saveCache: cached.save };
   }
 }
 
-async function rankedEvidence(repoDir: string, github: GitHub, modules: Module[]): Promise<Discussions> {
-  const cached = cachedGitHub(repoDir, github);
+async function rankedEvidence(cached: GitHub, modules: Module[]): Promise<Discussions> {
   const merged = (await cached.pullRequests()).filter((pr) => pr.mergedAt !== null);
   const rank = ranking(merged);
   const chosen = new Map<string, PullRequestSummary[]>(modules.map((m) => [m.path, []]));
@@ -91,25 +100,32 @@ async function rankedEvidence(repoDir: string, github: GitHub, modules: Module[]
  * `github` answering from the Target repo's cache where it can. The list is
  * cached per commit: a pull request merged since was merged upstream of the
  * code being documented. A pull request is cached until it is next updated.
- * Responses are cached only once validated, so a bad one is never replayed.
+ * Responses are cached only once validated, so a bad one is never replayed,
+ * and only when `save` is called.
  */
-function cachedGitHub(repoDir: string, github: GitHub): GitHub {
+function cachedGitHub(repoDir: string, github: GitHub): GitHub & { save(): Promise<void> } {
   const sha = git(repoDir, "rev-parse", "HEAD");
   const updatedAt = new Map<number, string>();
+  const unsaved = new Map<string, unknown>();
 
   async function cached<T>(name: string | undefined, fetch: () => Promise<T>, valid: (value: unknown) => boolean): Promise<T> {
     const file = name && join(repoDir, CACHE_DIR, "github", `${name}.json`);
+    if (file && unsaved.has(file)) return unsaved.get(file) as T;
     if (file && existsSync(file)) return JSON.parse(await readFile(file, "utf8"));
     const value = await fetch();
     if (!valid(value)) throw new Error(`malformed GitHub response: ${JSON.stringify(value)}`);
-    if (file) {
-      await mkdir(dirname(file), { recursive: true });
-      await writeFile(file, JSON.stringify(value));
-    }
+    if (file) unsaved.set(file, value);
     return value;
   }
 
   return {
+    async save() {
+      for (const [file, value] of unsaved) {
+        await mkdir(dirname(file), { recursive: true });
+        await writeFile(file, JSON.stringify(value));
+      }
+      unsaved.clear();
+    },
     async pullRequests() {
       const list = await cached(sha && `pulls-${sha}`, () => github.pullRequests(), isSummaryList);
       for (const pr of list) updatedAt.set(pr.number, pr.updatedAt);

@@ -26,7 +26,8 @@ export async function reset(
   const module = guideSection(target, section);
   await gitIgnore(repoDir, CACHE_DIR);
   const result: ResetResult = emptyReport();
-  const discussions = github && drawsOnGitHub(section, module) ? await gitHubEvidence(repoDir, github, module ? [module] : [], result.warnings) : undefined;
+  const { discussions, saveCache } = await gitHubEvidence(repoDir, drawsOnGitHub(section, module) ? github : undefined, module ? [module] : [], result.warnings);
+  await saveCache();
 
   const existing = await readSection(repoDir, sectionPath(target.config, section));
   // An adopted record carries Unsupported Claims, so it is replaced even if the text comes out the same.
