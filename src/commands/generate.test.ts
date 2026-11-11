@@ -394,6 +394,25 @@ describe("generate", () => {
         expect(read(repo.dir, SECTION)).toBe("# A\n\nOne.[^1]\n\n[^1]: src/a/a.ts (a)\n");
         expect(modelsUsed(llm)).toEqual(["claude-haiku-5-5", "claude-opus-5-5"]);
       });
+
+      it("asks the LLM again after an override changes, rather than reusing the old model's answers", async () => {
+        const repo = createFixtureRepo(configured({ write: "claude-opus-5-5" }));
+        await generate(repo.dir, {}, { llm: scriptedLlm(section("One.")) });
+        writeFileSync(join(repo.dir, "scribe.config.json"), JSON.stringify({ modules: [{ name: "A", path: "src/a" }], models: { write: "claude-sonnet-5-5", verify: "claude-opus-5-5" } }));
+
+        const llm = scriptedLlm(section("One."));
+        await generate(repo.dir, {}, { llm });
+
+        expect(modelsUsed(llm)).toEqual(["claude-opus-5-5", "claude-sonnet-5-5"]);
+      });
+
+      it("fails naming scribe.config.json when an override has the wrong shape", async () => {
+        for (const models of [["claude-opus-5-5"], { write: 5 }, { write: "" }, { writer: "claude-opus-5-5" }, { toString: "claude-opus-5-5" }]) {
+          const repo = createFixtureRepo(configured(models));
+
+          await expect(generate(repo.dir, {}, { llm: scriptedLlm(section("One.")) })).rejects.toThrow(/scribe\.config\.json.*models/);
+        }
+      });
     });
 
     it("never caches a verdict it can't use", async () => {

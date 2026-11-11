@@ -32,7 +32,17 @@ export async function loadConfig(repoDir: string): Promise<Config | undefined> {
   if (config.modules !== undefined && !isModuleList(config.modules)) {
     throw new Error(`${CONFIG_FILE}: "modules" must be a list of { "name": string, "path": string }`);
   }
+  if (config.models !== undefined && !isModelOverrides(config.models)) {
+    throw new Error(`${CONFIG_FILE}: "models" must be an object mapping any of ${Object.keys(MODELS).join(", ")} to a model name`);
+  }
   return config;
+}
+
+function isModelOverrides(value: unknown): value is Partial<Models> {
+  return (
+    typeof value === "object" && value !== null && !Array.isArray(value) &&
+    Object.entries(value).every(([kind, model]) => Object.hasOwn(MODELS, kind) && typeof model === "string" && model !== "")
+  );
 }
 
 function isModuleList(value: unknown): value is Module[] {
