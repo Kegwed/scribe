@@ -474,7 +474,7 @@ describe("generate", () => {
 
         await generate(repo.dir, {}, { llm });
 
-        expect(read(repo.dir, SECTION)).toBe("# A\n\nOne.[^1]\n\n[^1]: src/a/a.ts (a)\n");
+        expect(read(repo.dir, SECTION)).toBe(aSection("One.[^1]"));
         expect(modelsUsed(llm)).toEqual(["claude-haiku-5-5", "claude-opus-5-5"]);
       });
 
