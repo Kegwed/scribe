@@ -7,23 +7,15 @@ import { CONVENTIONS, conventionsEvidence, hasConventions } from "./conventions.
 import { type DocEvidence, docsAbout } from "./docs.ts";
 import { GETTING_STARTED, unmatchedCommands } from "./getting-started.ts";
 import { CHURN_DAYS, type ChurnEvidence, isChurnEvidence } from "./git-history.ts";
-import { type Discussions, type GitHubEvidence, gitHubRepo, NO_DISCUSSIONS } from "./github.ts";
+import { type Evidence, inFile, isRepoEvidence } from "./evidence.ts";
+import { type Discussions, gitHubRepo, NO_DISCUSSIONS } from "./github.ts";
 import { contentHash } from "./hash.ts";
 import { decisionRecords, KEY_DECISIONS, KEY_DECISIONS_SYSTEM, VERIFY_DECISIONS_SYSTEM } from "./key-decisions.ts";
 import { modelsOf } from "./config.ts";
 import { completeCached, estimateCost, isCached, type Llm, type LlmRequest, readCached } from "./llm.ts";
 import { type DriftRecord, type DriftReport, saveManifest } from "./manifest.ts";
 import type { Module } from "./modules.ts";
-import {
-  ARCHITECTURE,
-  isRepoEvidence,
-  OVERVIEW,
-  proposalPath,
-  readSection,
-  type RepoEvidence,
-  sectionPath,
-  type Target,
-} from "./target.ts";
+import { ARCHITECTURE, OVERVIEW, proposalPath, readSection, sectionPath, type Target } from "./target.ts";
 
 export interface WriteReport {
   /** Claims still unconfirmed after the Section's repair, left out of their Sections (ADR-0001). */
@@ -85,30 +77,6 @@ export type Confirm = (estimate: CostEstimate) => Promise<boolean>;
 /** Whether a run may go ahead: one that costs nothing always may, and so may one nobody is asked about. */
 export async function confirmed(estimate: CostEstimate, confirm: Confirm | undefined): Promise<boolean> {
   return estimate.tokens === 0 || !confirm || (await confirm(estimate));
-}
-
-/** What a Claim can cite: Evidence in a file of the Target repo, GitHub discussion, or Evidence about the repo as a whole. */
-export type Evidence = FileEvidence | GitHubEvidence | RepoEvidence;
-
-function inFile(item: Evidence): item is FileEvidence {
-  return "file" in item;
-}
-
-/** Evidence in a file of the Target repo: a code symbol, or a script, CI step or doc block for Getting started. */
-export interface FileEvidence {
-  /** `<file>#<name>`, stable across moves within the file. */
-  id: string;
-  /** Labels the Evidence in its citation. */
-  name: string;
-  /** Repo-relative, forward-slashed path of the file it is in. */
-  file: string;
-  /** Its text, line endings normalised. */
-  text: string;
-  /** Hash of `text`. */
-  hash: string;
-  /** 1-based lines it spans in the file as it is now. */
-  startLine: number;
-  endLine: number;
 }
 
 /**

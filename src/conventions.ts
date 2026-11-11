@@ -6,7 +6,7 @@ import type { CodeSymbol } from "./analyser.ts";
 import type { DocEvidence } from "./docs.ts";
 import { contentHash } from "./hash.ts";
 import type { Module } from "./modules.ts";
-import type { FileEvidence } from "./section-writer.ts";
+import type { FileEvidence } from "./evidence.ts";
 
 /** The Conventions Section's id, which is also its file's path in the Guide, without the extension. */
 export const CONVENTIONS = "conventions";

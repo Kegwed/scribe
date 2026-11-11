@@ -7,33 +7,12 @@ import { CONVENTIONS, lintConfigEvidence } from "./conventions.ts";
 import { type DocEvidence, readDocs } from "./docs.ts";
 import { GETTING_STARTED, type SetupEvidence, setupEvidence } from "./getting-started.ts";
 import { type ChurnEvidence, churnEvidence } from "./git-history.ts";
-import type { FileEvidence } from "./section-writer.ts";
+import type { FileEvidence, RepoEvidence } from "./evidence.ts";
 import { isGitHubEvidence } from "./github.ts";
 import { contentHash } from "./hash.ts";
 import { KEY_DECISIONS } from "./key-decisions.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
 import { detectModules, type Module } from "./modules.ts";
-
-/**
- * Evidence about the Target repo as a whole, which Overview and Architecture
- * cite directly instead of the Module Sections they are built from (ADR-0005).
- */
-export interface RepoEvidence {
-  /** `graph:<name>` for what Scribe derives from the code, `file:<path>` for a file's content. */
-  id: string;
-  /** Labels the Evidence in its citation. */
-  label: string;
-  text: string;
-  /** Hash of `text`. */
-  hash: string;
-  /** The lines of a file it is, if it is a file's content, which its citation links to. */
-  source?: { file: string; startLine: number; endLine: number };
-}
-
-/** Told apart structurally: GitHub Evidence has a `url`, Evidence in a file a `file`, and this neither. */
-export function isRepoEvidence(item: object): item is RepoEvidence {
-  return "label" in item && !("url" in item) && !("file" in item);
-}
 
 export const OVERVIEW = "overview";
 export const ARCHITECTURE = "architecture";

@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { contentHash } from "./hash.ts";
-import type { FileEvidence } from "./section-writer.ts";
+import type { FileEvidence } from "./evidence.ts";
 
 /** The Getting started Section's id, which is also its file's path in the Guide, without the extension. */
 export const GETTING_STARTED = "getting-started";

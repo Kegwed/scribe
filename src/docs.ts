@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { CodeSymbol } from "./analyser.ts";
 import { contentHash } from "./hash.ts";
 import type { Module } from "./modules.ts";
-import type { FileEvidence } from "./section-writer.ts";
+import type { FileEvidence } from "./evidence.ts";
 
 /**
  * One heading's part of an existing doc in the Target repo, such as the README
