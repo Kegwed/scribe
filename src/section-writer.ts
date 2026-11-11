@@ -157,8 +157,8 @@ interface Subject {
   /** The prompt that writes the Section afresh from its Evidence, each piece already rendered. */
   frame(rendered: string[]): string;
   render(evidence: Evidence): string;
-  /** What one piece of its Evidence is called in a revision prompt. */
-  item: string;
+  /** What its Evidence is called in revision and repair prompts. */
+  evidenceName: EvidenceName;
   /** Why a Claim citing none of `evidence` fails. */
   uncited: string;
   /** Why a Claim fails before any model sees it, or undefined; deterministic. */
@@ -212,7 +212,7 @@ export function sectionWriter(
       verifySystem: () => VERIFY_REPO_SYSTEM,
       frame: (rendered) => bottomUpPrompt(title, moduleSections(), rendered),
       render: renderRepo,
-      item: "Evidence item",
+      evidenceName: { one: "Evidence item", many: "Evidence items" },
       uncited: `cites no Evidence ${title} draws on directly`,
       worthAsking: notDocsAlone,
     };
@@ -227,7 +227,7 @@ export function sectionWriter(
       system: () => GETTING_STARTED_SYSTEM,
       verifySystem: () => VERIFY_SETUP_SYSTEM,
       render: renderSetup,
-      item: "piece of Evidence",
+      evidenceName: PIECES,
       uncited: "cites no script, CI step or doc",
       worthAsking: notDocsAlone,
       check({ text }) {
@@ -243,7 +243,7 @@ export function sectionWriter(
       system: (_, summarised) => (summarised ? `${CONVENTIONS_SYSTEM}\n\n${SUMMARISED_NOTE}` : CONVENTIONS_SYSTEM),
       verifySystem: () => VERIFY_CONVENTIONS_SYSTEM,
       render: renderModuleEvidence,
-      item: "piece of Evidence",
+      evidenceName: PIECES,
       uncited: "cites no lint or format config, code or CONTRIBUTING passage",
     }),
     [KEY_DECISIONS]: () => ({
@@ -255,7 +255,7 @@ export function sectionWriter(
       system: () => KEY_DECISIONS_SYSTEM,
       verifySystem: () => VERIFY_DECISIONS_SYSTEM,
       render: renderModuleEvidence,
-      item: "piece of Evidence",
+      evidenceName: PIECES,
       uncited: "cites no ADR or pull request thread",
     }),
     [OVERVIEW]: () => bottomUpSubject(OVERVIEW),
@@ -288,7 +288,7 @@ export function sectionWriter(
       ].join("\n\n"),
       frame: (rendered) => sectionPrompt(module, rendered),
       render: renderModuleEvidence,
-      item: "symbol",
+      evidenceName: { one: "symbol", many: "symbols" },
       uncited: "cites no Evidence from this Module",
       worthAsking: notDocsAlone,
       churn: churn.get(module.path),
@@ -368,7 +368,7 @@ export function sectionWriter(
         cited: !record.adopted,
         changedEvidence: changedEvidence.filter((id) => !isChurnEvidence(id)),
         unsupported: record.unsupportedClaims ?? [],
-        item: about.item,
+        evidenceName: about.evidenceName,
       })
       : about.frame(rendered);
     return planFit(about.items, about.render, build, llm.promptLimit);
@@ -413,7 +413,7 @@ export function sectionWriter(
     const counts = { ...of, written: firstWritten, confirmed: firstWritten - failures.size, kept: 0 };
     report.verifiedClaims.push(counts);
     if (failures.size > 0) {
-      written = await writeSection(repairPrompt(firstPrompt, written, failures));
+      written = await writeSection(repairPrompt(firstPrompt, written, failures, about.evidenceName));
       failures = await verifySection(llm, models.verify, repoDir, scribes(written), about);
     }
     const { paragraphs } = written;
@@ -1125,12 +1125,20 @@ interface Revision {
   changedEvidence: string[];
   /** Claims a human wrote that no Evidence backs, to keep word for word. */
   unsupported: string[];
-  /** What one piece of the Evidence is called, e.g. "symbol", in the instruction. */
-  item: string;
+  evidenceName: EvidenceName;
 }
 
+/** What a Section's Evidence is called in a prompt's instruction, one piece and many. */
+interface EvidenceName {
+  one: string;
+  many: string;
+}
+
+const PIECES: EvidenceName = { one: "piece of Evidence", many: "pieces of Evidence" };
+
 /** `prompt` writes the Section afresh; Revision says what it is now and what changed. */
-function revisionPrompt(prompt: string, present: Set<string>, { current, cited, changedEvidence, unsupported, item }: Revision): string {
+function revisionPrompt(prompt: string, present: Set<string>, { current, cited, changedEvidence, unsupported, evidenceName }: Revision): string {
+  const { one, many } = evidenceName;
   const changes = changedEvidence.map((id) => `<changed id="${id}" status="${present.has(id) ? "changed" : "gone"}"/>`);
   return [
     prompt,
@@ -1139,8 +1147,8 @@ function revisionPrompt(prompt: string, present: Set<string>, { current, cited, 
     ...unsupported.map((text) => `<unsupported-claim>\n${text}\n</unsupported-claim>`),
     [
       cited
-        ? `The current Section above was written before the listed ${item}s changed or went away; each footnote names the id of the ${item} it cites.`
-        : `The current Section above was written by a human, before the listed ${item}s changed or went away; its footnotes are left out.`,
+        ? `The current Section above was written before the listed ${many} changed or went away; each footnote names the id of the ${one} it cites.`
+        : `The current Section above was written by a human, before the listed ${many} changed or went away; its footnotes are left out.`,
       `Write the Section again: keep every Claim the changes don't affect word for word, citing ${cited ? "the same evidence" : "the evidence that backs it"}, and correct, add or remove only the Claims the changes do affect.`,
       ...(unsupported.length > 0
         ? [`Each <unsupported-claim> is a human's Claim that no Evidence backs: keep it word for word, with no evidence.`]
@@ -1150,13 +1158,13 @@ function revisionPrompt(prompt: string, present: Set<string>, { current, cited, 
 }
 
 /** `firstPrompt` is the one that produced `failed`, so a revision's repair still sees the Section's current text. */
-function repairPrompt(firstPrompt: string, failed: SectionResponse, failures: Map<Claim, string>): string {
+function repairPrompt(firstPrompt: string, failed: SectionResponse, failures: Map<Claim, string>, { many }: EvidenceName): string {
   const feedback = [...failures].map(([claim, reason]) => `<failure>\n<claim>${claim.text}</claim>\n<reason>${reason}</reason>\n</failure>`);
   return [
     firstPrompt,
     `<section>\n${JSON.stringify(failed)}\n</section>`,
     ...feedback,
-    "The Section above failed verification on the listed Claims. Write the Section again: keep every other Claim as it is, and correct each listed Claim so the symbols it cites back it. Do not leave out any Claim: one that can't be corrected is removed and reported after this.",
+    `The Section above failed verification on the listed Claims. Write the Section again: keep every other Claim as it is, and correct each listed Claim so the ${many} it cites back it. Do not leave out any Claim: one that can't be corrected is removed and reported after this.`,
   ].join("\n\n");
 }
 
