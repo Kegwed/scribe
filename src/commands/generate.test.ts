@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
+import { fakeGitHub } from "../test/fake-github.ts";
 import type { CostEstimate } from "../section-writer.ts";
 import { isSectionWrite, recordedLlm, type RecordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { generate } from "./generate.ts";
@@ -402,6 +403,17 @@ describe("generate", () => {
       expect(read(repo.dir, SECTION)).toBe("# A\n\nNAMES lists forty names.[^1]\n\n[^1]: src/a/a.ts (NAMES)\n");
       expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: [], leftOut: ["src/a/a.ts#helper"] }]);
       expect(result.droppedClaims).toContainEqual(expect.objectContaining({ text: "Run delegates to a helper." }));
+    });
+
+    it("leaves out GitHub discussion before any code symbol", async () => {
+      const repo = createFixtureRepo(LARGE);
+      const github = fakeGitHub([{ number: 3, files: ["src/a/a.ts"], body: "Adds run and its helper. ".repeat(50) }]);
+      const llm = scriptedLlm(cites("Run delegates to a helper.", "src/a/a.ts#run"), {}, { promptLimit: LIMIT });
+
+      const result = await generate(repo.dir, {}, { llm, github });
+
+      expect(writes(llm)[0]!.prompt).not.toContain("<discussion");
+      expect(result.reduced).toEqual([{ section: "modules/src-a", summarised: ["src/a/a.ts#helper"], leftOut: ["github:pr/3"] }]);
     });
 
     it("leaves out a symbol too large even to summarise, without asking for a summary", async () => {
