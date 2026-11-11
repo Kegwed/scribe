@@ -157,11 +157,13 @@ function uniqueSectionIds(modules: Module[]): Map<Module, string> {
 async function repoEvidenceOf(repoDir: string, modules: Module[], imports: ModuleImport[]): Promise<Map<string, RepoEvidence>> {
   const items: Omit<RepoEvidence, "hash">[] = [
     {
+      kind: "repo",
       id: "graph:modules",
       label: "Modules of the repo",
       text: modules.map((m) => `${m.name} (${m.path})`).join("\n"),
     },
     {
+      kind: "repo",
       id: "graph:imports",
       label: "Import graph between Modules",
       text: imports.length > 0 ? imports.map(({ from, to }) => `${from} imports ${to}`).join("\n") : "No Module imports another.",
@@ -171,7 +173,7 @@ async function repoEvidenceOf(repoDir: string, modules: Module[], imports: Modul
   if (existsSync(packageJson)) {
     const text = (await readFile(packageJson, "utf8")).replace(/\r\n?/g, "\n");
     const source = { file: "package.json", startLine: 1, endLine: text.trimEnd().split("\n").length };
-    items.push({ id: "file:package.json", label: "package.json", text, source });
+    items.push({ kind: "repo", id: "file:package.json", label: "package.json", text, source });
   }
   return new Map(items.map((item) => [item.id, { ...item, hash: contentHash(item.text) }]));
 }

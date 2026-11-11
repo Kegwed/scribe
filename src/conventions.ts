@@ -39,12 +39,12 @@ export async function lintConfigEvidence(repoDir: string, guideDir: string): Pro
       evidence.push(...packageJsonConfig(file, await readFile(join(repoDir, file), "utf8")));
       continue;
     }
-    const kind = LINT_CONFIGS.find(({ file: pattern }) => pattern.test(fileName));
-    if (!kind) continue;
+    const config = LINT_CONFIGS.find(({ file: pattern }) => pattern.test(fileName));
+    if (!config) continue;
     const lines = (await readFile(join(repoDir, file), "utf8")).replace(/\r\n?/g, "\n").replace(/\n+$/, "").split("\n");
     const text = lines.join("\n");
     if (text.trim() === "") continue;
-    evidence.push({ id: file, name: kind.name, file, text, hash: contentHash(text), startLine: 1, endLine: lines.length });
+    evidence.push({ kind: "config", id: file, name: config.name, file, text, hash: contentHash(text), startLine: 1, endLine: lines.length });
   }
   return evidence;
 }
@@ -74,7 +74,7 @@ function packageJsonConfig(file: string, content: string): FileEvidence[] {
     if (!Object.hasOwn(parsed, key)) return [];
     const text = `${JSON.stringify(key)}: ${JSON.stringify((parsed as Record<string, unknown>)[key], null, 2)}`;
     const start = Math.max(0, lines.findIndex((line) => line.includes(`${JSON.stringify(key)}:`)));
-    return [{ id: `${file}#${key}`, name, file, text, hash: contentHash(text), startLine: start + 1, endLine: valueEnd(lines, start) + 1 }];
+    return [{ kind: "config" as const, id: `${file}#${key}`, name, file, text, hash: contentHash(text), startLine: start + 1, endLine: valueEnd(lines, start) + 1 }];
   });
 }
 
@@ -118,5 +118,5 @@ export function conventionsEvidence(
 
 /** Whether Conventions has anything to be written from: code samples alone show no convention. */
 export function hasConventions(evidence: FileEvidence[]): boolean {
-  return evidence.some((e) => !("exportedAs" in e));
+  return evidence.some((e) => e.kind !== "symbol");
 }

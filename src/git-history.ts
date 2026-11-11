@@ -14,6 +14,7 @@ export const HOT_COMMITS = 5;
  * or stable, not on every commit.
  */
 export interface ChurnEvidence {
+  kind: "history";
   /** `history:<Module path>`. */
   id: string;
   /** Path of the Module, as git's pathspec. */
@@ -51,7 +52,7 @@ export function churnEvidence(repoDir: string, modules: Module[]): Map<string, C
     const statement = commits >= HOT_COMMITS
       ? `This Module is hot: ${HOT_COMMITS} or more commits changed it in the ${CHURN_DAYS} days of git history cited.`
       : `This Module is stable: fewer than ${HOT_COMMITS} commits changed it in the ${CHURN_DAYS} days of git history cited.`;
-    evidence.set(module.path, { id: `${ID_PREFIX}${module.path}`, module: module.path, statement, hash: contentHash(statement) });
+    evidence.set(module.path, { kind: "history", id: `${ID_PREFIX}${module.path}`, module: module.path, statement, hash: contentHash(statement) });
   }
   return evidence;
 }

@@ -271,14 +271,14 @@ export function sectionWriter(
       // Told about GitHub discussion and summaries only when the request carries them, so requests without stay as recorded.
       system: (sent, summarised) => [
         SECTION_SYSTEM,
-        ...(sent.some((e) => !inFile(e)) ? [SECTION_DISCUSSION] : []),
+        ...(sent.some((e) => e.kind === "github") ? [SECTION_DISCUSSION] : []),
         ...(summarised ? [SUMMARISED_NOTE] : []),
       ].join("\n\n"),
       // Told about docs and discussion only when the Claim cites them, so other verdicts stay as recorded.
       verifySystem: (cited) => [
         VERIFY_SYSTEM,
         ...(cited.some(isDoc) ? [VERIFY_DOCS] : []),
-        ...(cited.some((e) => !inFile(e)) ? [VERIFY_DISCUSSION] : []),
+        ...(cited.some((e) => e.kind === "github") ? [VERIFY_DISCUSSION] : []),
       ].join("\n\n"),
       frame: (rendered) => sectionPrompt(module, rendered),
       render: renderModuleEvidence,
@@ -667,7 +667,7 @@ function citation(evidence: Evidence, permalinks: Permalinks | undefined): strin
     const { label, source } = evidence;
     return permalinks && source ? `[${label}](${permalinks.file(source)})` : label;
   }
-  if (!inFile(evidence)) return `[${evidence.label}](${evidence.url})`;
+  if (evidence.kind === "github") return `[${evidence.label}](${evidence.url})`;
   const label = `${evidence.file} (${evidence.name})`;
   return permalinks ? `[${label}](${permalinks.file(evidence)})` : label;
 }
@@ -890,17 +890,18 @@ function renderSetup(e: Evidence): string {
 }
 
 function isCode(e: Evidence): e is CodeSymbol {
-  return "exportedAs" in e;
+  return e.kind === "symbol";
 }
 
 function isDoc(e: Evidence): e is DocEvidence {
-  return "kind" in e && e.kind === "doc";
+  return e.kind === "doc";
 }
 
 function renderModuleEvidence(e: Evidence): string {
   if (isCode(e)) return `<symbol id="${e.id}" exported="${e.exportedAs.length > 0}">\n${e.text}\n</symbol>`;
   if (isDoc(e)) return `${DOC_TAG}${e.id}">\n${e.text}\n</doc>`;
-  if (!inFile(e)) return `<discussion id="${e.id}" source="${e.label}">\n${e.text}\n</discussion>`;
+  if (e.kind === "github") return `<discussion id="${e.id}" source="${e.label}">\n${e.text}\n</discussion>`;
+  if (isRepoEvidence(e)) return renderRepo(e);
   return `<evidence id="${e.id}" file="${e.file}">\n${e.text}\n</evidence>`;
 }
 

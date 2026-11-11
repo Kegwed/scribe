@@ -6,6 +6,7 @@ import { listProductCode, type Module, moduleOf } from "./modules.ts";
 
 /** A top-level declaration in Product code: the unit code Evidence is anchored to (ADR-0004). */
 export interface CodeSymbol {
+  kind: "symbol";
   /** `<file>#<name>`, stable across moves within the file. */
   id: string;
   name: string;
@@ -154,6 +155,7 @@ function symbolsOf(file: string, module: Module, sourceFile: SourceFile): CodeSy
   return [...grouped].map(([name, { texts, exportedAs, startLine, endLine }]) => {
     const text = texts.join("\n").replace(/\r\n?/g, "\n");
     return {
+      kind: "symbol" as const,
       id: `${file}#${name}`,
       name,
       file,

@@ -3,8 +3,13 @@ import type { GitHubEvidence } from "./github.ts";
 /** What a Claim can cite: Evidence in a file of the Target repo, GitHub discussion, or Evidence about the repo as a whole. */
 export type Evidence = FileEvidence | GitHubEvidence | RepoEvidence;
 
-/** Evidence in a file of the Target repo: a code symbol, or a script, CI step or doc block for Getting started. */
+/**
+ * Evidence in a file of the Target repo: a code `symbol`, a passage of an
+ * existing `doc`, a `setup` item (a script, CI step or doc shell block) for
+ * Getting started, or a lint or format `config`.
+ */
 export interface FileEvidence {
+  kind: "symbol" | "doc" | "setup" | "config";
   /** `<file>#<name>`, stable across moves within the file. */
   id: string;
   /** Labels the Evidence in its citation. */
@@ -25,6 +30,7 @@ export interface FileEvidence {
  * cite directly instead of the Module Sections they are built from (ADR-0005).
  */
 export interface RepoEvidence {
+  kind: "repo";
   /** `graph:<name>` for what Scribe derives from the code, `file:<path>` for a file's content. */
   id: string;
   /** Labels the Evidence in its citation. */
@@ -36,11 +42,10 @@ export interface RepoEvidence {
   source?: { file: string; startLine: number; endLine: number };
 }
 
-/** Told apart structurally: GitHub Evidence has a `url`, Evidence in a file a `file`, and this neither. */
-export function isRepoEvidence(item: object): item is RepoEvidence {
-  return "label" in item && !("url" in item) && !("file" in item);
+export function isRepoEvidence(item: Evidence): item is RepoEvidence {
+  return item.kind === "repo";
 }
 
 export function inFile(item: Evidence): item is FileEvidence {
-  return "file" in item;
+  return item.kind !== "repo" && item.kind !== "github";
 }

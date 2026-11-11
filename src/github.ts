@@ -8,6 +8,7 @@ import { type Module, moduleOf } from "./modules.ts";
 
 /** One item of GitHub discussion a Claim can cite: a pull request's description, a review comment, or a linked issue. */
 export interface GitHubEvidence {
+  kind: "github";
   /** `github:pr/<n>`, `github:pr/<n>/comment/<id>` or `github:issue/<n>`. */
   id: string;
   /** How a citation names it, such as "PR #12, review comment". */
@@ -168,7 +169,7 @@ function ranking(merged: PullRequestSummary[]): (pr: PullRequestSummary) => numb
 function discussionOf(pr: PullRequest): GitHubEvidence[] {
   const item = (id: string, label: string, url: string, raw: string) => {
     const text = withoutPeople(raw);
-    return { id: `${GITHUB_EVIDENCE}${id}`, label, url, text, hash: contentHash(text) };
+    return { kind: "github" as const, id: `${GITHUB_EVIDENCE}${id}`, label, url, text, hash: contentHash(text) };
   };
   return [
     item(`pr/${pr.number}`, `PR #${pr.number}`, pr.url, `${pr.title}\n\n${pr.body}`.trim()),

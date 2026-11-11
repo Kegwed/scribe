@@ -14,6 +14,7 @@ export const GETTING_STARTED = "getting-started";
  * in the repo's existing docs, each with the commands it lets a reader run.
  */
 export interface SetupEvidence extends FileEvidence {
+  kind: "setup";
   /** Commands this item shows to exist, whitespace normalised. */
   commands: string[];
 }
@@ -90,6 +91,7 @@ async function scriptEvidence(repoDir: string, files: string[]): Promise<SetupEv
     const line = (found === -1 ? scriptsLine : found) + 1;
     const text = `${JSON.stringify(name)}: ${JSON.stringify(command)}`;
     return [{
+      kind: "setup" as const,
       id: `${file}#scripts.${name}`,
       name: `scripts.${name}`,
       file,
@@ -128,6 +130,7 @@ function stepEvidence(file: string, content: string): SetupEvidence[] {
     if (commands.length === 0) return;
     const text = commands.join("\n");
     steps.push({
+      kind: "setup",
       id: `${file}#step-${steps.length + 1}`,
       name: commands[0]!,
       file,
@@ -164,6 +167,7 @@ function docEvidence(file: string, content: string): SetupEvidence[] {
     if (commands.length === 0) continue;
     const text = commands.join("\n");
     blocks.push({
+      kind: "setup",
       // A heading's slug never holds a dot, so this can't be the id of one of the doc's passages.
       id: `${file}#block.${blocks.length + 1}`,
       name: commands[0]!,
