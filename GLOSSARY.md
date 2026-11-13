@@ -33,7 +33,7 @@ Scribe's committed record of what it last wrote for each Section and the Evidenc
 _Avoid_: State file, lockfile, index
 
 **Stale**:
-Said of a Section when Evidence it cites has changed since Scribe last wrote it.
+Said of a Section when code, git-history or existing-docs Evidence it cites has changed since Scribe last wrote it. GitHub Evidence never makes a Section Stale: it is taken as fixed when cited.
 _Avoid_: Outdated, out of sync
 
 **Frozen**:
