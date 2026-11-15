@@ -7,7 +7,7 @@ import { modelsOf } from "./config.ts";
 import { CONVENTIONS, conventionsEvidence, hasConventions } from "./conventions.ts";
 import { docsAbout, isDoc } from "./docs.ts";
 import { DRIFT_SCHEMA, DRIFT_SYSTEM, driftPrompt, parseDrift, VERIFY_DRIFT_SYSTEM } from "./drift.ts";
-import { ATTACH_OUTPUT_TOKENS, DRIFT_OUTPUT_TOKENS, type SectionCost, SUMMARY_OUTPUT_TOKENS, totalCost, VERDICT_OUTPUT_TOKENS, WRITE_OUTPUT_TOKENS } from "./estimate.ts";
+import { ATTACH_OUTPUT_TOKENS, CITED_PER_CLAIM, CLAIM_FAILURE_RATE, DRIFT_OUTPUT_TOKENS, expectedClaims, FAILURE_TOKENS, OUTPUT_TOKENS_PER_CLAIM, type RequestCounts, REVISION_FAILURE_RATE, SECTION_CHARS_PER_CLAIM, type SectionCost, SUMMARY_OUTPUT_TOKENS, VERDICT_OUTPUT_TOKENS } from "./estimate.ts";
 import { type Evidence, inFile, isRepoEvidence } from "./evidence.ts";
 import { ASSUMED_SUMMARY, finishFit, type FitPlan, type FittedPrompt, keepCodeRank, parseSummary, planFit, summaryRequests, wholeFit } from "./fit.ts";
 import { GETTING_STARTED, unmatchedCommands } from "./getting-started.ts";
@@ -16,7 +16,7 @@ import { type Discussions, NO_DISCUSSIONS } from "./github.ts";
 import { contentHash } from "./hash.ts";
 import { ATTACH_SCHEMA, ATTACH_SYSTEM, attachPrompt, humanClaims, parseAttachments } from "./human-claims.ts";
 import { decisionRecords, KEY_DECISIONS, KEY_DECISIONS_SYSTEM, VERIFY_DECISIONS_SYSTEM } from "./key-decisions.ts";
-import { completeCached, estimateCost, isCached, type Llm, type LlmRequest, readCached } from "./llm.ts";
+import { completeCached, estimateCost, inputTokens, isCached, type Llm, type LlmRequest, priceTokens, readCached, type RequestCost } from "./llm.ts";
 import { type DriftRecord, type DriftReport, saveManifest } from "./manifest.ts";
 import type { Module } from "./modules.ts";
 import { BOTTOM_UP, bottomUpPrompt, type Claim, CONVENTIONS_SYSTEM, type EvidenceName, GETTING_STARTED_SYSTEM, parseSection, parseVerdict, PIECES, renderModuleEvidence, renderRepo, renderSetup, repairPrompt, revisionPrompt, SECTION_DISCUSSION, SECTION_SYSTEM, sectionPrompt, type SectionResponse, SUMMARISED_NOTE, VERDICT_SCHEMA, VERIFY_CONVENTIONS_SYSTEM, VERIFY_DISCUSSION, VERIFY_DOCS, VERIFY_REPO_SYSTEM, VERIFY_SETUP_SYSTEM, VERIFY_SYSTEM, verifyPrompt, writeRequest } from "./prompts.ts";
@@ -51,11 +51,13 @@ export function emptyReport(): WriteReport {
 
 export interface SectionWriter {
   /**
-   * What `write` (or `propose`, given no `existing`) would cost for a Section:
-   * its first write and that write's verification. A repair, needed only when
-   * a Claim fails verification, would cost more. Overview and Architecture are
-   * estimated from the Module Sections as they are now; `moduleSectionsChange`
-   * says those will be rewritten first, so their write is not the cached one.
+   * What `write` (or `propose`, given no `existing`) is expected to cost for a
+   * Section: its summaries, Drift search, first write, a verdict per expected
+   * Claim, and the repair some failed Claim is likely to call for, with that
+   * repair's verdicts. Overview and Architecture are estimated from the Module
+   * Sections as they are now, or as long as expected where none is written
+   * yet; `moduleSectionsChange` says those will be rewritten first, so their
+   * write is not the cached one.
    */
   estimate(section: string, existing: string | undefined, changedEvidence?: string[], moduleSectionsChange?: boolean): SectionCost;
   /**
@@ -147,7 +149,30 @@ export function sectionWriter(
   /** What a Section is written from, but its Evidence by id; a prompt that writes it afresh joins its rendered Evidence unless it says otherwise. */
   type SubjectSpec = Omit<Subject, "evidence" | "frame"> & Partial<Pick<Subject, "frame">>;
 
-  function bottomUpSubject(section: string): SubjectSpec {
+  /**
+   * Each Module Section as Overview and Architecture will be written from it,
+   * for an estimate: as it is on disk, or, not yet written, as long as the
+   * prose of the Claims its write is expected to make.
+   */
+  function expectedModuleSections(): { module: Module; text: string }[] {
+    const written = new Map(moduleSections().map((s) => [s.module, s.text]));
+    return target.modules.map((module) => {
+      const text = written.get(module);
+      if (text !== undefined) return { module, text };
+      if (!unwritten.has(module)) {
+        const section = sectionIds.get(module)!;
+        const about = subject(section);
+        const { fitted, request } = plannedWrite(section, about, undefined, undefined);
+        const claims = about.worthAsking(fitted.sent) ? expectedClaims(inputTokens(request)) : 0;
+        unwritten.set(module, `# ${about.title}\n\n${"x".repeat(Math.round(claims * SECTION_CHARS_PER_CLAIM))}\n`);
+      }
+      return { module, text: unwritten.get(module)! };
+    });
+  }
+  /** The text `expectedModuleSections` assumes for each Module Section not yet written, worked out once. */
+  const unwritten = new Map<Module, string>();
+
+  function bottomUpSubject(section: string, expected: boolean): SubjectSpec {
     const { title, system, evidence: ids } = BOTTOM_UP[section]!;
     return {
       title,
@@ -155,7 +180,7 @@ export function sectionWriter(
       // Repo-wide Evidence is never code, so it is never summarised.
       system: () => system,
       verifySystem: () => VERIFY_REPO_SYSTEM,
-      frame: (rendered) => bottomUpPrompt(title, moduleSections(), rendered),
+      frame: (rendered) => bottomUpPrompt(title, expected ? expectedModuleSections() : moduleSections(), rendered),
       render: renderRepo,
       evidenceName: { one: "Evidence item", many: "Evidence items" },
       uncited: `cites no Evidence ${title} draws on directly`,
@@ -163,8 +188,8 @@ export function sectionWriter(
     };
   }
 
-  /** Each top-level Section's Subject, by Section id; any other Section is a Module's. */
-  const topLevel: Record<string, () => SubjectSpec> = {
+  /** Each top-level Section's Subject, by Section id, `expected` for an estimate; any other Section is a Module's. */
+  const topLevel: Record<string, (expected: boolean) => SubjectSpec> = {
     [GETTING_STARTED]: () => ({
       title: "Getting started",
       items: setup,
@@ -203,12 +228,13 @@ export function sectionWriter(
       evidenceName: PIECES,
       uncited: "cites no ADR or pull request thread",
     }),
-    [OVERVIEW]: () => bottomUpSubject(OVERVIEW),
-    [ARCHITECTURE]: () => bottomUpSubject(ARCHITECTURE),
+    [OVERVIEW]: (expected) => bottomUpSubject(OVERVIEW, expected),
+    [ARCHITECTURE]: (expected) => bottomUpSubject(ARCHITECTURE, expected),
   };
 
-  function subject(section: string): Subject {
-    const spec = Object.hasOwn(topLevel, section) ? topLevel[section]!() : moduleSubject(section);
+  /** What a Section is written from; `expected` for an estimate, before Module Sections it is built from are written. */
+  function subject(section: string, expected = false): Subject {
+    const spec = Object.hasOwn(topLevel, section) ? topLevel[section]!(expected) : moduleSubject(section);
     return { frame: (rendered) => rendered.join("\n\n"), ...spec, evidence: new Map(spec.items.map((e) => [e.id, e])) };
   }
 
@@ -323,6 +349,33 @@ export function sectionWriter(
   function keptUnsupported(section: string, existing: string | undefined, changedEvidence: string[] | undefined): Set<string> {
     const record = manifest.sections[section];
     return new Set(changedEvidence && existing !== undefined && record ? record.unsupportedClaims ?? [] : []);
+  }
+
+  /**
+   * The first write of a Section as an estimate prices it, with the summaries
+   * it needs that aren't cached. Until every summary is cached the write's
+   * prompt is unknown, so it is estimated with summaries of the assumed length.
+   */
+  function plannedWrite(section: string, about: Subject, existing: string | undefined, changedEvidence: string[] | undefined) {
+    const plan = planFirstWrite(section, about, existing, changedEvidence);
+    const summaryCalls = summaryRequests(models.summarise, plan);
+    const uncachedSummaries = summaryCalls.filter((request) => !isCached(repoDir, request));
+    const fitted = finishFit(plan, uncachedSummaries.length > 0
+      ? summaryCalls.map(() => ASSUMED_SUMMARY)
+      : summaryCalls.map((request) => parseSummary(readCached(repoDir, request)!)));
+    return { fitted, uncachedSummaries, request: writeRequestFor(about, fitted, fitted.prompt) };
+  }
+
+  /**
+   * The share of a Section's Claims a write is expected to verify anew, and the
+   * share of those expected to fail: all of them at the first write's rate,
+   * unless it revises `existing`, whose Claims citing only unchanged Evidence
+   * keep their cached verdicts, and whose new Claims fail more rarely.
+   */
+  function expectedVerification(section: string, sent: Evidence[], existing: string | undefined, changedEvidence: string[] | undefined) {
+    if (!changedEvidence || existing === undefined || !manifest.sections[section]) return { share: 1, failureRate: CLAIM_FAILURE_RATE };
+    const changed = new Set(changedEvidence);
+    return { share: sent.filter((e) => changed.has(e.id)).length / Math.max(sent.length, 1), failureRate: REVISION_FAILURE_RATE };
   }
 
   function writeRequestFor(about: Subject, fitted: FittedPrompt, prompt: string): LlmRequest {
@@ -449,46 +502,60 @@ export function sectionWriter(
 
   return {
     estimate(section, existing, changedEvidence, moduleSectionsChange = false) {
-      const about = subject(section);
-      const plan = planFirstWrite(section, about, existing, changedEvidence);
-      const summaryCalls = summaryRequests(models.summarise, plan);
-      const uncachedSummaries = summaryCalls.filter((request) => !isCached(repoDir, request));
-      // Until every summary is cached the write's prompt is unknown, so it is estimated with summaries of the assumed length.
-      const fitted = finishFit(plan, uncachedSummaries.length > 0
-        ? summaryCalls.map(() => ASSUMED_SUMMARY)
-        : summaryCalls.map((request) => parseSummary(readCached(repoDir, request)!)));
-      const request = writeRequestFor(about, fitted, fitted.prompt);
+      const about = subject(section, true);
+      const { fitted, uncachedSummaries, request } = plannedWrite(section, about, existing, changedEvidence);
       // A Section with no Evidence is written without the LLM; a cached first write means a re-run of work already paid for.
       const written = about.worthAsking(fitted.sent);
       if (uncachedSummaries.length === 0 && (!written || (!moduleSectionsChange && isCached(repoDir, request)))) {
-        return { section, tokens: 0, dollars: 0, unpriced: [] };
+        return sectionCost(section, [], 0);
       }
       const drift = written ? driftRequest(section)?.request : undefined;
-      const costs = [
-        ...uncachedSummaries.map((summary) => estimateCost(summary, SUMMARY_OUTPUT_TOKENS)),
+      const costs: Expected[] = [
+        ...uncachedSummaries.map((summary) => once("summary", estimateCost(summary, SUMMARY_OUTPUT_TOKENS))),
         // Only a written Section is searched for Drift; a Proposal never is, so this overstates a Proposal's cost.
-        ...(drift && !isCached(repoDir, drift) ? [estimateCost(drift, DRIFT_OUTPUT_TOKENS)] : []),
-        ...(written ? [
-          estimateCost(request, WRITE_OUTPUT_TOKENS),
-          estimateCost(
-            { kind: "verdict", model: models.verify, system: about.verifySystem([]), prompt: about.frame(fitted.sent.map(about.render)), schema: VERDICT_SCHEMA },
-            VERDICT_OUTPUT_TOKENS,
-          ),
-        ] : []),
+        ...(drift && !isCached(repoDir, drift) ? [once("drift", estimateCost(drift, DRIFT_OUTPUT_TOKENS))] : []),
       ];
-      return sectionCost(section, costs);
+      if (!written) return sectionCost(section, costs, 0);
+
+      const input = inputTokens(request);
+      const claims = expectedClaims(input);
+      const output = claims * OUTPUT_TOKENS_PER_CLAIM;
+      // A revision keeps the Claims its changed Evidence doesn't touch, whose verdicts are cached; only the rest are verified anew.
+      const { share, failureRate } = expectedVerification(section, fitted.sent, existing, changedEvidence);
+      const verified = claims * share;
+      const failing = verified * failureRate;
+      // The Section's one repair, sent when any Claim fails: its prompt carries the first prompt, the first answer and why each Claim failed.
+      const repair = 1 - (1 - failureRate) ** verified;
+      const repairInput = input + output + (repair > 0 ? (failing / repair) * FAILURE_TOKENS : 0);
+      // Each verdict carries a Claim and the Evidence it cites, about `CITED_PER_CLAIM` pieces of average size.
+      const rendered = fitted.sent.map(about.render);
+      const cited = rendered.join("").length / Math.max(rendered.length, 1) * Math.min(CITED_PER_CLAIM, rendered.length);
+      const verdict = estimateCost({
+        kind: "verdict",
+        model: models.verify,
+        system: about.verifySystem([]),
+        prompt: verifyPrompt({ text: "x".repeat(SECTION_CHARS_PER_CLAIM), evidence: [] }, [], about.render) + "x".repeat(Math.round(cited)),
+        schema: VERDICT_SCHEMA,
+      }, VERDICT_OUTPUT_TOKENS);
+      costs.push(
+        once("write", priceTokens(request.model, input, output)),
+        { kind: "write", times: repair, cost: priceTokens(request.model, repairInput, output) },
+        // The first verification's verdicts, then those of the Claims the repair rewrote.
+        { kind: "verdict", times: verified + failing, cost: verdict },
+      );
+      return sectionCost(section, costs, claims);
     },
 
     estimateAdopt(section, content) {
       const about = subject(section);
       const { texts } = adoptedClaims(about, content);
-      const costs: ReturnType<typeof estimateCost>[] = [];
+      const costs: Expected[] = [];
       let claims: Claim[] | undefined = texts.map((text) => ({ text, evidence: [] }));
       if (texts.length > 0 && about.evidence.size > 0) {
         const { request } = attachRequest(about, texts);
         const cached = readCached(repoDir, request);
         if (cached === undefined) {
-          costs.push(estimateCost(request, ATTACH_OUTPUT_TOKENS));
+          costs.push(once("attach", estimateCost(request, ATTACH_OUTPUT_TOKENS)));
           claims = undefined;
         } else {
           const attached = parseAttachments(cached, texts.length);
@@ -504,10 +571,10 @@ export function sectionWriter(
         : texts.map((text): LlmRequest => ({
           kind: "verdict", model: models.verify, system: about.verifySystem([]), prompt: verifyPrompt({ text, evidence: [] }, [], about.render), schema: VERDICT_SCHEMA,
         }));
-      costs.push(...verdicts.map((request) => estimateCost(request, VERDICT_OUTPUT_TOKENS)));
+      costs.push(...verdicts.map((request) => once("verdict", estimateCost(request, VERDICT_OUTPUT_TOKENS))));
       const drift = driftRequest(section)?.request;
-      if (drift && !isCached(repoDir, drift)) costs.push(estimateCost(drift, DRIFT_OUTPUT_TOKENS));
-      return sectionCost(section, costs);
+      if (drift && !isCached(repoDir, drift)) costs.push(once("drift", estimateCost(drift, DRIFT_OUTPUT_TOKENS)));
+      return sectionCost(section, costs, texts.length);
     },
 
     async write(section, existing, changedEvidence) {
@@ -572,15 +639,31 @@ export function sectionWriter(
   };
 }
 
-/** A cost estimate of one Section, from the estimates of the requests it would send. */
-function sectionCost(section: string, costs: ReturnType<typeof estimateCost>[]): SectionCost {
-  const { tokens, dollars, unpriced } = totalCost(costs.map((c) => ({
-    section,
-    tokens: c.tokens,
-    dollars: c.dollars ?? 0,
-    unpriced: c.dollars === undefined ? [c.model] : [],
-  })));
-  return { section, tokens, dollars, unpriced };
+/** A request of `kind` expected `times` over, a fraction when it may not be sent at all, at `cost` each. */
+interface Expected {
+  kind: LlmRequest["kind"];
+  times: number;
+  cost: RequestCost;
+}
+
+function once(kind: LlmRequest["kind"], cost: RequestCost): Expected {
+  return { kind, times: 1, cost };
+}
+
+/** A cost estimate of one Section, from the requests it is expected to send and the Claims it is expected to make. */
+function sectionCost(section: string, costs: Expected[], claims: number): SectionCost {
+  const requests: RequestCounts = {};
+  let tokens = 0;
+  let dollars = 0;
+  const unpriced = new Set<string>();
+  for (const { kind, times, cost } of costs) {
+    if (times <= 0) continue;
+    requests[kind] = (requests[kind] ?? 0) + times;
+    tokens += cost.tokens * times;
+    if (cost.dollars === undefined) unpriced.add(cost.model);
+    else dollars += cost.dollars * times;
+  }
+  return { section, tokens: Math.round(tokens), dollars, unpriced: [...unpriced], requests, claims };
 }
 
 /** The verifier's request for a Claim, or why it fails before any model sees it. */

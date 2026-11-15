@@ -11,7 +11,7 @@ import type { Adapters } from "./adapters.ts";
 import { connectGitHub, whyGitHubIsOff } from "./github.ts";
 import { claudeLlm } from "./llm.ts";
 import type { DriftReport } from "./manifest.ts";
-import type { Confirm } from "./estimate.ts";
+import type { Confirm, RequestCounts } from "./estimate.ts";
 import type { WriteReport } from "./section-writer.ts";
 import { isTopLevelSection } from "./target.ts";
 
@@ -19,7 +19,7 @@ const USAGE = "Usage: scribe <command> [--yes]\n\nCommands:\n  init      Detect 
 
 /** Prints a run's estimate, then asks to go ahead unless `yes`; no answer, as when stdin closes, declines. */
 function confirmer(yes: boolean): Confirm {
-  return async ({ sections, tokens, dollars, unpriced }) => {
+  return async ({ sections, tokens, dollars, unpriced, requests, claims }) => {
     const paid = sections.filter((s) => s.tokens > 0);
     const width = Math.max(0, ...paid.map((s) => s.section.length));
     console.log(`Estimated cost: ${usd(dollars)} for ${paid.length} Section${paid.length === 1 ? "" : "s"}, about ${tokens.toLocaleString("en-US")} tokens`);
@@ -27,10 +27,28 @@ function confirmer(yes: boolean): Confirm {
     const cached = sections.length - paid.length;
     if (cached > 0) console.log(`  plus ${cached} cached Section${cached === 1 ? "" : "s"} at no cost`);
     if (unpriced.length > 0) console.log(`  not counting ${unpriced.join(", ")}, whose price Scribe doesn't know`);
+    const kinds = (Object.keys(REQUEST_NAMES) as (keyof RequestCounts)[])
+      .map((kind) => [kind, Math.round(requests[kind] ?? 0)] as const)
+      .filter(([, count]) => count > 0);
+    const total = kinds.reduce((sum, [, count]) => sum + count, 0);
+    console.log(`An estimate, made before calling Claude: about ${count(total)} requests (${kinds.map(([kind, n]) => `${count(n)} ${REQUEST_NAMES[kind]}`).join(", ")}) for about ${count(Math.round(claims))} expected Claims. The run can spend more or less.`);
     if (yes) return true;
     const answer = await ask("Continue? [y/N] ");
     return /^y(es)?$/i.test(answer?.trim() ?? "");
   };
+}
+
+/** How the estimate names each kind of request, in the order it lists them. */
+const REQUEST_NAMES: Record<keyof RequestCounts, string> = {
+  write: "Section writes and repairs",
+  verdict: "verdicts",
+  summary: "summaries",
+  drift: "Drift searches",
+  attach: "Evidence searches",
+};
+
+function count(n: number): string {
+  return n.toLocaleString("en-US");
 }
 
 function usd(dollars: number): string {

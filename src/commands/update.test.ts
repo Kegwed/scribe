@@ -109,6 +109,25 @@ describe("update's cost estimate", () => {
     expect(repo.git("status", "--porcelain", "--untracked-files=all")).toBe("");
   });
 
+  it("expects a revision to verify anew only the Claims its changed Evidence touches, and a Proposal all of its Claims", async () => {
+    const repo = await generated();
+    repo.commit({ "src/a/a.ts": A_CHANGED });
+    const estimateOf = async () => {
+      let shown: CostEstimate | undefined;
+      await update(repo.dir, { confirm: async (estimate) => ((shown = estimate), false) }, { llm: scriptedLlm({ paragraphs: [] }) });
+      return shown!.sections[0]!;
+    };
+
+    const revision = await estimateOf();
+    repo.commit({ [A]: "# A\n\nMy words.\n" });
+    const proposal = await estimateOf();
+
+    // One of A's two symbols changed, so about half its Claims are verified anew; a Proposal is written afresh.
+    expect(revision.requests.verdict).toBeGreaterThan(0);
+    expect(revision.requests.verdict).toBeLessThan(revision.claims);
+    expect(proposal.requests.verdict).toBeGreaterThanOrEqual(proposal.claims);
+  });
+
   it("counts a Proposal for a Frozen, Stale Section, and declining writes none", async () => {
     const repo = await generated();
     repo.commit({ [A]: "# A\n\nMy words.\n", "src/a/a.ts": A_CHANGED });
@@ -147,7 +166,7 @@ describe("update's cost estimate", () => {
 
     expect(asked).toBe(false);
     expect(result.estimate).toEqual({
-      sections: [{ section: "modules/src-a", tokens: 0, dollars: 0, unpriced: [] }], tokens: 0, dollars: 0, unpriced: [],
+      sections: [{ section: "modules/src-a", tokens: 0, dollars: 0, unpriced: [], requests: {}, claims: 0 }], tokens: 0, dollars: 0, unpriced: [], requests: {}, claims: 0,
     });
     expect(read(repo.dir, A)).toBe(stableSection("A", "src/a", "A returns two.[^1]", ["[^1]: src/a/a.ts (a)"]));
   });
@@ -365,7 +384,7 @@ describe("update", () => {
     expect(repo.git("status", "--porcelain")).toBe("");
     expect(result).toEqual({
       droppedClaims: [], verifiedClaims: [], frozen: [], reduced: [], warnings: [], removed: [], proposals: [],
-      estimate: { sections: [], tokens: 0, dollars: 0, unpriced: [] }, declined: false, drift: [],
+      estimate: { sections: [], tokens: 0, dollars: 0, unpriced: [], requests: {}, claims: 0 }, declined: false, drift: [],
     });
   });
 

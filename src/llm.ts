@@ -34,20 +34,38 @@ const PRICES: Record<string, { input: number; output: number }> = {
  * Approximate by design, since counting exactly would itself call the API.
  * `dollars` is undefined for a model whose price isn't known.
  */
-export function estimateCost(request: LlmRequest, outputTokens: number): { model: string; tokens: number; dollars: number | undefined } {
-  const price = PRICES[request.model];
-  const input = approximateTokens(request.system + request.prompt + JSON.stringify(request.schema));
-  return {
-    model: request.model,
-    tokens: input + outputTokens,
-    dollars: price && (input * price.input + outputTokens * price.output) / 1_000_000,
-  };
+export function estimateCost(request: LlmRequest, outputTokens: number): RequestCost {
+  return priceTokens(request.model, inputTokens(request), outputTokens);
 }
 
-/** A rough token count: about four characters per token for English prose and code. */
-export function approximateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+export interface RequestCost {
+  model: string;
+  tokens: number;
+  /** Undefined for a model whose price isn't known. */
+  dollars: number | undefined;
 }
+
+/** The tokens a request is expected to send, approximated from its length. */
+export function inputTokens(request: LlmRequest): number {
+  return approximateTokens(request.system + request.prompt + JSON.stringify(request.schema));
+}
+
+/** What `input` tokens sent to `model` and `output` tokens back cost. */
+export function priceTokens(model: string, input: number, output: number): RequestCost {
+  const price = PRICES[model];
+  return { model, tokens: input + output, dollars: price && (input * price.input + output * price.output) / 1_000_000 };
+}
+
+/**
+ * A rough token count. Claude's tokenizer counted about 2.4 characters a token
+ * on the code and prose of Scribe's prompts for honojs/hono, far fewer than
+ * the four often assumed for English.
+ */
+export function approximateTokens(text: string): number {
+  return Math.ceil(text.length / CHARS_PER_TOKEN);
+}
+
+const CHARS_PER_TOKEN = 2.4;
 
 export interface LlmRequest {
   /**
@@ -72,8 +90,8 @@ export interface Llm {
 }
 
 /**
- * A budget, not a measured boundary: about 100k tokens at the usual estimate of
- * 4 characters a token, leaving the rest of the context window for the system
+ * A budget, not a measured boundary: about 165k tokens at the 2.4 characters a
+ * token `approximateTokens` assumes, leaving the rest of the context window for the system
  * text, a repair's extra text and the response.
  */
 export const PROMPT_LIMIT = 400_000;
