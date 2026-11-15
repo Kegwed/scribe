@@ -9,21 +9,69 @@ import { scriptedLlm } from "./test/recorded-llm.ts";
 
 const cli = fileURLToPath(new URL("./cli.ts", import.meta.url));
 
-/** Runs the CLI with no API key and Claude's endpoint unreachable, so any LLM call would fail; `input` is its stdin. */
+/** Runs the CLI with a dummy API key and Claude's endpoint unreachable, so any LLM call would fail. */
 function scribe(dir: string, ...args: string[]) {
   return scribeWithInput(dir, "", ...args);
 }
 
+/** As `scribe`, with `input` as its stdin. */
 function scribeWithInput(dir: string, input: string, ...args: string[]) {
+  return run(dir, { input, key: "sk-ant-dummy" }, ...args);
+}
+
+/** Runs the CLI with Claude's endpoint unreachable; `key` undefined leaves `ANTHROPIC_API_KEY` unset. */
+function run(dir: string, { input = "", key }: { input?: string; key?: string }, ...args: string[]) {
   const { ANTHROPIC_API_KEY: _, ...env } = process.env;
   const { status, stdout, stderr } = spawnSync(process.execPath, [cli, ...args], {
     cwd: dir,
     encoding: "utf8",
     input,
-    env: { ...env, ANTHROPIC_BASE_URL: "http://127.0.0.1:9" },
+    env: { ...env, ANTHROPIC_BASE_URL: "http://127.0.0.1:9", ...(key === undefined ? {} : { ANTHROPIC_API_KEY: key }) },
   });
   return { status, stdout, stderr };
 }
+
+describe("a missing ANTHROPIC_API_KEY", () => {
+  function target() {
+    return createFixtureRepo({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
+      "src/a/a.ts": "export const a = 1;\n",
+    });
+  }
+  const commands = [["generate"], ["update"], ["reset", "modules/src-a"], ["adopt", "modules/src-a"]];
+
+  for (const [name, missing] of [["unset", undefined], ["empty", ""]] as const) {
+    for (const args of commands) {
+      it(`stops scribe ${args[0]} before any estimate when ${name}, writing nothing`, () => {
+        const repo = target();
+
+        const { status, stdout, stderr } = run(repo.dir, { input: "y\n", key: missing }, ...args, "--yes");
+
+        expect(stdout).toBe("");
+        expect(stderr).toContain("ANTHROPIC_API_KEY");
+        expect(stderr).toContain("https://console.anthropic.com/settings/keys");
+        expect(stderr).toMatch(/bash\/zsh:\s+export ANTHROPIC_API_KEY=/);
+        expect(stderr).toMatch(/PowerShell:\s+\$env:ANTHROPIC_API_KEY\s*=\s*"/);
+        expect(stderr).toMatch(/cmd:\s+set ANTHROPIC_API_KEY=/);
+        expect(status).toBe(1);
+        expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
+      });
+    }
+  }
+
+  it("doesn't stop scribe init or scribe status", () => {
+    const repo = createFixtureRepo({ "src/a/a.ts": "export const a = 1;\n" });
+
+    const init = run(repo.dir, {}, "init");
+    expect(init.stdout).toContain("Detected");
+    expect(init.status).toBe(0);
+
+    // Nothing is generated yet, so status lists the missing Sections and exits 1 for them.
+    const status = run(repo.dir, {}, "status");
+    expect(status.stderr).toBe("");
+    expect(status.stdout).toContain("Not written yet: overview");
+  });
+});
 
 describe("scribe generate's cost estimate", () => {
   function target() {
@@ -62,7 +110,7 @@ describe("scribe generate's cost estimate", () => {
     expect(stdout).toMatch(/^Estimated cost: /);
     expect(stdout).not.toContain("Continue?");
     expect(stdout).not.toContain("Cancelled;");
-    // No API key is set, so reaching the LLM is what fails the run.
+    // Claude's endpoint is unreachable, so reaching the LLM is what fails the run.
     expect(stderr).toMatch(/^scribe: /);
     expect(status).toBe(1);
   });
