@@ -235,6 +235,76 @@ describe("generate", () => {
       expect(result.estimate.tokens).toBe(0);
       expect(result.estimate.dollars).toBe(0);
     });
+
+    /** A Module `src/a` of `count` exported functions, each a few lines long. */
+    const moduleOf = (count: number): Files => ({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
+      "src/a/a.ts": Array.from({ length: count }, (_, i) =>
+        `/** Step ${i} of the pipeline. */\nexport function step${i}(value: number) {\n  return value * ${i} + ${i};\n}\n`).join("\n"),
+    });
+    const estimateOf = async (files: Files): Promise<CostEstimate> => {
+      const repo = createFixtureRepo(files);
+      let shown: CostEstimate | undefined;
+      await generate(repo.dir, { confirm: async (estimate) => ((shown = estimate), false) }, { llm: scriptedLlm("unused") });
+      return shown!;
+    };
+    const sectionOf = (estimate: CostEstimate, section: string) => estimate.sections.find((s) => s.section === section)!;
+
+    it("counts every kind of request a generate makes, repairs included, not only Section writes", async () => {
+      const repo = createFixtureRepo({
+        ...moduleOf(3),
+        "src/a/big.ts": `export function helper(value: number) {\n${Array.from({ length: 60 }, (_, i) => `  value += ${i};`).join("\n")}\n  return value;\n}\n`,
+        "README.md": "# App\n\n## Steps\n\nCall `step1(value)` to double a value.\n",
+      });
+      const llm = scriptedLlm(
+        { paragraphs: [{ claims: [{ text: "Step one runs first.", evidence: ["src/a/a.ts#step1"] }, { text: "Helper adds.", evidence: ["src/a/big.ts#helper"] }] }] },
+        { "Step one runs first.": { confirmed: false, reason: "The code doesn't say when it runs." } },
+        { promptLimit: 1500, drift: [] },
+      );
+      let shown: CostEstimate | undefined;
+
+      await generate(repo.dir, { confirm: async (estimate) => ((shown = estimate), true) }, { llm });
+
+      const sent = [...new Set(llm.calls.map((call) => call.kind))].sort();
+      expect(sent).toEqual(["drift", "summary", "verdict", "write"]);
+      for (const kind of sent) expect(shown!.requests[kind]).toBeGreaterThan(0);
+      const moduleSection = sectionOf(shown!, "modules/src-a");
+      // Its first write, and the repair some Claim's failed verdict will call for.
+      expect(moduleSection.requests.write).toBeGreaterThan(1);
+      expect(moduleSection.requests.verdict).toBeGreaterThanOrEqual(moduleSection.claims);
+    });
+
+    it("expects more Claims, each with its verdict, from a Module with more Evidence, and estimates it higher", async () => {
+      const small = sectionOf(await estimateOf(moduleOf(2)), "modules/src-a");
+      const large = sectionOf(await estimateOf(moduleOf(40)), "modules/src-a");
+
+      expect(small.claims).toBeGreaterThan(0);
+      expect(large.claims).toBeGreaterThan(small.claims);
+      expect(large.requests.verdict).toBeGreaterThan(small.requests.verdict!);
+      expect(large.dollars).toBeGreaterThan(small.dollars);
+    });
+
+    it("estimates Overview and Architecture with the Module Sections they will be written from, before any is written", async () => {
+      const small = await estimateOf(moduleOf(2));
+      const large = await estimateOf(moduleOf(40));
+
+      for (const section of ["overview", "architecture"]) {
+        expect(sectionOf(large, section).tokens).toBeGreaterThan(sectionOf(small, section).tokens);
+      }
+    });
+
+    it("estimates more for more Modules", async () => {
+      const one = await estimateOf(moduleOf(5));
+      const files = moduleOf(5);
+      const two = await estimateOf({
+        ...files,
+        "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }, { name: "B", path: "src/b" }] }),
+        "src/b/b.ts": files["src/a/a.ts"]!,
+      });
+
+      expect(two.dollars).toBeGreaterThan(one.dollars);
+      expect(sectionOf(two, "overview").tokens).toBeGreaterThan(sectionOf(one, "overview").tokens);
+    });
   });
 
   it("never caches a response it can't use", async () => {

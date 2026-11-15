@@ -108,7 +108,7 @@ describe("scribe generate's cost estimate", () => {
 
     const { status, stdout } = scribeWithInput(repo.dir, "n\n", "generate");
 
-    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 4 Sections, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\n  modules\/src-b  \$\d+\.\d+\n  overview       \$\d+\.\d+\n  architecture   \$\d+\.\d+\n  plus 3 cached Sections at no cost\nContinue\? \[y\/N\] /);
+    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 4 Sections, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\n  modules\/src-b  \$\d+\.\d+\n  overview       \$\d+\.\d+\n  architecture   \$\d+\.\d+\n  plus 3 cached Sections at no cost\nAn estimate, made before calling Claude: about [\d,]+ requests \([\d,]+ Section writes and repairs, [\d,]+ verdicts\) for about [\d,]+ expected Claims\. The run can spend more or less\.\nContinue\? \[y\/N\] /);
     expect(stdout).toMatch(/Cancelled; no LLM was called and nothing was written\.\n$/);
     expect(status).toBe(1);
     expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
@@ -411,7 +411,7 @@ describe("scribe adopt and scribe reset", () => {
 
     const { status, stdout } = scribeWithInput(repo.dir, "n\n", "reset", "modules/src-a");
 
-    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 1 Section, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\nContinue\? \[y\/N\] /);
+    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 1 Section, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\nAn estimate, made before calling Claude: about [\d,]+ requests \([^)]+\) for about [\d,]+ expected Claims\. The run can spend more or less\.\nContinue\? \[y\/N\] /);
     expect(stdout).toMatch(/Cancelled; no LLM was called and nothing was written\.\n$/);
     expect(status).toBe(1);
     expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
@@ -456,7 +456,7 @@ describe("scribe adopt and scribe reset", () => {
 
       const { status, stdout } = scribeWithInput(repo.dir, "n\n", "adopt", "modules/src-a");
 
-      expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 1 Section, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\nContinue\? \[y\/N\] Cancelled; no LLM was called and nothing was written\.\n$/);
+      expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 1 Section, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\nAn estimate, made before calling Claude: about [\d,]+ requests \([^)]+\) for about [\d,]+ expected Claims\. The run can spend more or less\.\nContinue\? \[y\/N\] Cancelled; no LLM was called and nothing was written\.\n$/);
       expect(status).toBe(1);
       expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe(before);
     });
@@ -470,7 +470,7 @@ describe("scribe adopt and scribe reset", () => {
       try {
         const { status, stdout } = await scribeAgainst(claude.url, repo.dir, "adopt", "modules/src-a", "--yes");
 
-        expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 1 Section, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\nUnsupported Claim, kept: A is fast\.\nAdopted modules\/src-a\.\n$/);
+        expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 1 Section, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\nAn estimate, made before calling Claude: about [\d,]+ requests \([^)]+\) for about [\d,]+ expected Claims\. The run can spend more or less\.\nUnsupported Claim, kept: A is fast\.\nAdopted modules\/src-a\.\n$/);
         expect(status).toBe(0);
         expect(claude.requests.length).toBeGreaterThan(0);
         const record = JSON.parse(readFileSync(join(repo.dir, ".scribe/manifest.json"), "utf8")).sections["modules/src-a"];
