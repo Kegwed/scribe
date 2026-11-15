@@ -112,7 +112,7 @@ export function liveEval(checkouts: string, resultsFile: string, confirm: Confir
     },
     async generate(dir) {
       if (!existsSync(join(dir, CONFIG_FILE))) await init(dir);
-      const github = connectGitHub(dir);
+      const { github } = connectGitHub(dir);
       return generate(dir, { confirm }, { llm: claudeLlm(), ...(github ? { github } : {}) });
     },
   };

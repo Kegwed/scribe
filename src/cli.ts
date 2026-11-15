@@ -8,7 +8,7 @@ import { update } from "./commands/update.ts";
 import { CONFIG_FILE } from "./config.ts";
 import { createInterface } from "node:readline";
 import type { Adapters } from "./adapters.ts";
-import { connectGitHub } from "./github.ts";
+import { connectGitHub, whyGitHubIsOff } from "./github.ts";
 import { claudeLlm } from "./llm.ts";
 import type { DriftReport } from "./manifest.ts";
 import type { Confirm } from "./estimate.ts";
@@ -54,9 +54,10 @@ function cancelled(): number {
   return 1;
 }
 
-/** Claude, and GitHub when `origin` is on it and `gh` is signed in. */
+/** Claude, and GitHub when `origin` is on it and `gh` is signed in; otherwise a warning says why it's off. */
 function adapters(): Adapters {
-  const github = connectGitHub(process.cwd());
+  const { github, off } = connectGitHub(process.cwd());
+  if (off) console.error(`warning: ${whyGitHubIsOff(off)}`);
   return { llm: claudeLlm(), ...(github ? { github } : {}) };
 }
 
