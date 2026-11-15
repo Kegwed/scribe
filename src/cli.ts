@@ -54,6 +54,19 @@ function cancelled(): number {
   return 1;
 }
 
+const MISSING_KEY = `ANTHROPIC_API_KEY is not set, so Scribe can't call Claude. Nothing was estimated or written.
+
+Create a key at https://console.anthropic.com/settings/keys, then set it in your shell:
+
+  bash/zsh:    export ANTHROPIC_API_KEY=sk-ant-...
+  PowerShell:  $env:ANTHROPIC_API_KEY = "sk-ant-..."
+  cmd:         set ANTHROPIC_API_KEY=sk-ant-...`;
+
+/** Whether Claude's key is in the environment, the only place Scribe reads it from; empty counts as missing. */
+function hasKey(): boolean {
+  return (process.env.ANTHROPIC_API_KEY ?? "") !== "";
+}
+
 /** Claude, and GitHub when `origin` is on it and `gh` is signed in; otherwise a warning says why it's off. */
 function adapters(): Adapters {
   const { github, off } = connectGitHub(process.cwd());
@@ -68,6 +81,10 @@ async function main(argv: string[]): Promise<number> {
   const yes = flags.includes("--yes") || flags.includes("-y");
   if ((command === "adopt" || command === "reset") && section === undefined) {
     console.error(`Usage: scribe ${command} <section>\n\nThe Sections are named as scribe status lists them, such as modules/src-core.`);
+    return 1;
+  }
+  if ((command === "generate" || command === "update" || command === "adopt" || command === "reset") && !hasKey()) {
+    console.error(MISSING_KEY);
     return 1;
   }
   switch (command) {
