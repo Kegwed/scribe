@@ -184,6 +184,17 @@ describe("existing docs as a Source", () => {
       expect((await generate(repo.dir, {}, { llm: llm() })).estimate.tokens).toBe(0);
     });
 
+    it("estimates the verdicts on the Drift a search may find, beside the search itself", async () => {
+      // A Section with no Claims: any verdict it is expected to need is on Drift.
+      const repo = createFixtureRepo({ ...CONTRADICTING, [SECTION]: "# Auth\n" });
+      let requests: Record<string, number> = {};
+
+      await adopt(repo.dir, "modules/src-auth", { confirm: async (estimate) => ((requests = estimate.requests), false) }, { llm: llm() });
+
+      expect(requests.drift).toBe(1);
+      expect(requests.verdict).toBeGreaterThan(0);
+    });
+
     it("keeps reporting Drift once a human's edited Section is adopted", async () => {
       const repo = createFixtureRepo(CONTRADICTING);
       await generate(repo.dir, {}, { llm: llm() });

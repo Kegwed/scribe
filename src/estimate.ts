@@ -137,9 +137,9 @@ export function attachRequest(request: LlmRequest): ExpectedRequests {
   return oneRequest("attach", estimateCost(request, ATTACH_OUTPUT_TOKENS));
 }
 
-/** A search of a Module's docs and code for Drift. */
-export function driftSearch(request: LlmRequest): ExpectedRequests {
-  return oneRequest("drift", estimateCost(request, DRIFT_OUTPUT_TOKENS));
+/** A search of a Module's docs and code for Drift, and a verdict at `verdict` on each Drift it is expected to find. */
+export function driftSearch(request: LlmRequest, verdict: RequestCost): ExpectedRequests[] {
+  return [oneRequest("drift", estimateCost(request, DRIFT_OUTPUT_TOKENS)), { kind: "verdict", count: DRIFT_PER_SEARCH, cost: verdict }];
 }
 
 /** A verdict for each of `requests`. */
@@ -204,9 +204,9 @@ export function expectedProseChars(request: LlmRequest): number {
 }
 
 /**
- * A verdict on a Claim not yet written, from `request`, built with an empty
- * Claim citing nothing: it is expected to carry a Module Section's prose per
- * Claim, and about `CITED_PER_CLAIM` pieces of the average size of `evidence`,
+ * A verdict on a Claim not yet written, or on a Drift not yet found, from
+ * `request`, built with an empty Claim citing nothing: it is expected to carry
+ * a Module Section's prose per Claim, and about `CITED_PER_CLAIM` pieces of the average size of `evidence`,
  * rendered as the verifier sees them.
  */
 export function unwrittenVerdict(request: LlmRequest, evidence: string[]): RequestCost {
@@ -264,3 +264,5 @@ const ATTACH_OUTPUT_TOKENS = 500;
  * are short: 8 of hono's 10 Drift searches found no Drift.
  */
 const DRIFT_OUTPUT_TOKENS = 500;
+/** Drift a search is expected to find, each verified by a verdict of its own. Measured: hono's 10 Drift searches found 4. */
+const DRIFT_PER_SEARCH = 0.4;

@@ -316,11 +316,22 @@ export function sectionWriter(
     const sided = found.filter(({ docs, code }) =>
       docs.length > 0 && code.length > 0 && docs.every((id) => evidenceIs(id, isDoc)) && code.every((id) => evidenceIs(id, isCode)));
     const claims = sided.map(({ description, docs, code }) => ({ text: description, evidence: [...docs, ...code] }));
-    const failures = await verifySection(llm, models.verify, repoDir, { paragraphs: [{ claims }] }, { ...about, verifySystem: () => VERIFY_DRIFT_SYSTEM });
+    const failures = await verifySection(llm, models.verify, repoDir, { paragraphs: [{ claims }] }, driftVerifier(about));
 
     const record = (ids: string[]) => [...new Set(ids)].map((id) => ({ id, hash: evidence.get(id)!.hash }));
     return sided.flatMap(({ description, docs, code }, i) =>
       failures.has(claims[i]!) ? [] : [{ description, docs: record(docs), code: record(code) }]);
+  }
+
+  /**
+   * The Drift search of `section` for an estimate, with the verdicts on the
+   * Drift it may find; nothing once it is cached, or for a Module no doc concerns.
+   */
+  function expectedDrift(section: string, about: Subject): ExpectedRequests[] {
+    const search = driftRequest(section)?.request;
+    if (!search || isCached(repoDir, search)) return [];
+    const verdict = verdictFor(models.verify, { text: "", evidence: [] }, [], driftVerifier(about));
+    return driftSearch(search, unwrittenVerdict(verdict, [...about.evidence.values()].map(about.render)));
   }
 
   /**
@@ -498,11 +509,10 @@ export function sectionWriter(
       if (uncachedSummaries.length === 0 && (!written || (!moduleSectionsChange && isCached(repoDir, request)))) {
         return sectionCost(section, [], 0);
       }
-      const drift = written ? driftRequest(section)?.request : undefined;
       const expected: ExpectedRequests[] = [
         ...uncachedSummaries.map(summaryRequest),
         // Only a written Section is searched for Drift; a Proposal never is, so this overstates a Proposal's cost.
-        ...(drift && !isCached(repoDir, drift) ? [driftSearch(drift)] : []),
+        ...(written ? expectedDrift(section, about) : []),
       ];
       if (!written) return sectionCost(section, expected, 0);
 
@@ -536,9 +546,7 @@ export function sectionWriter(
         })
         // Which Evidence each Claim cites is unknown until it is found, so its verdict is estimated without any.
         : texts.map((text) => verdictFor(models.verify, { text, evidence: [] }, [], about));
-      expected.push(...verdicts(verdictRequests));
-      const drift = driftRequest(section)?.request;
-      if (drift && !isCached(repoDir, drift)) expected.push(driftSearch(drift));
+      expected.push(...verdicts(verdictRequests), ...expectedDrift(section, about));
       return sectionCost(section, expected, texts.length);
     },
 
@@ -611,6 +619,11 @@ function verdictRequest(model: string, claim: Claim, about: Subject): { request:
   const cited = [...new Set(claim.evidence)].flatMap((id) => about.evidence.get(id) ?? []);
   if (cited.length === 0) return { failed: about.uncited };
   return { request: verdictFor(model, claim, cited, about) };
+}
+
+/** A Subject whose Claims are Drift, verified against both the docs and the code they cite. */
+function driftVerifier(about: Subject): Subject {
+  return { ...about, verifySystem: () => VERIFY_DRIFT_SYSTEM };
 }
 
 /** The verifier's request for a Claim against `cited`; an estimate builds one before it knows the Claim or its Evidence. */
