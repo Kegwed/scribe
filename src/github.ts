@@ -251,19 +251,35 @@ export function ghAuthToken(): string | undefined {
 }
 
 /**
- * The GitHub adapter for the Target repo: undefined unless `origin` points at
- * GitHub and `token` gives one, in which case Scribe uses its other Sources only.
+ * Why the GitHub Source is off: `origin` isn't on GitHub, or there's no token
+ * because `gh` isn't installed or signed in.
  */
-export function connectGitHub(repoDir: string, token: () => string | undefined = ghAuthToken): GitHub | undefined {
+export type GitHubOff = "not-on-github" | "no-token";
+
+/** One line saying why the GitHub Source is off, and the fix if there is one. */
+export function whyGitHubIsOff(off: GitHubOff): string {
+  return off === "not-on-github"
+    ? "the GitHub Source is off because `origin` isn't on GitHub; there's nothing to fix."
+    : "the GitHub Source is off because `gh` isn't installed or signed in; `gh auth login` turns it on.";
+}
+
+/** The GitHub adapter, or why the GitHub Source is off. */
+export type GitHubConnection = { github: GitHub; off?: undefined } | { github?: undefined; off: GitHubOff };
+
+/**
+ * The GitHub adapter for the Target repo, if `origin` points at GitHub and
+ * `token` gives one; otherwise the reason it's off, and Scribe uses its other Sources only.
+ */
+export function connectGitHub(repoDir: string, token: () => string | undefined = ghAuthToken): GitHubConnection {
   const repo = gitHubRepo(repoDir);
-  if (!repo) return undefined;
+  if (!repo) return { off: "not-on-github" };
   const secret = token();
-  if (!secret) return undefined;
+  if (!secret) return { off: "no-token" };
   const [owner, name] = repo.split("/");
   const query = (text: string, variables: Record<string, unknown>) =>
     graphql(secret, text, { owner, name, ...variables }) as Promise<any>;
 
-  return {
+  const github: GitHub = {
     async pullRequests() {
       const pulls: PullRequestSummary[] = [];
       let after: string | null = null;
@@ -296,6 +312,7 @@ export function connectGitHub(repoDir: string, token: () => string | undefined =
       };
     },
   };
+  return { github };
 }
 
 /** The most recently updated merged pull requests are listed, up to this many. */

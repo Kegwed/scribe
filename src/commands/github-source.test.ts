@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { connectGitHub } from "../github.ts";
+import { connectGitHub, whyGitHubIsOff } from "../github.ts";
 import { MODELS } from "../llm.ts";
 import { type CannedPullRequest, fakeGitHub } from "../test/fake-github.ts";
 import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
@@ -137,22 +137,29 @@ describe("the GitHub Source", () => {
       const repo = createFixtureRepo(TARGET);
       repo.git("remote", "add", "origin", "git@github.com:acme/app.git");
 
-      expect(connectGitHub(repo.dir, token)).toBeDefined();
+      const { github, off } = connectGitHub(repo.dir, token);
+
+      expect(github).toBeDefined();
+      expect(off).toBeUndefined();
     });
 
-    it("is skipped without a token", () => {
+    it("is off for want of a token, when gh is missing or not signed in", () => {
       const repo = createFixtureRepo(TARGET);
       repo.git("remote", "add", "origin", "https://github.com/acme/app.git");
 
-      expect(connectGitHub(repo.dir, noToken)).toBeUndefined();
+      expect(connectGitHub(repo.dir, noToken)).toEqual({ off: "no-token" });
     });
 
-    it("is skipped when origin is not on GitHub, or there is none", () => {
+    it("being off for want of a token is explained with the fix, gh auth login", () => {
+      expect(whyGitHubIsOff("no-token")).toBe("the GitHub Source is off because `gh` isn't installed or signed in; `gh auth login` turns it on.");
+    });
+
+    it("is off because origin is not on GitHub, or there is none", () => {
       const elsewhere = createFixtureRepo(TARGET);
       elsewhere.git("remote", "add", "origin", "https://gitlab.com/acme/github.com.git");
 
-      expect(connectGitHub(elsewhere.dir, token)).toBeUndefined();
-      expect(connectGitHub(createFixtureRepo(TARGET).dir, token)).toBeUndefined();
+      expect(connectGitHub(elsewhere.dir, token)).toEqual({ off: "not-on-github" });
+      expect(connectGitHub(createFixtureRepo(TARGET).dir, token)).toEqual({ off: "not-on-github" });
     });
 
     it("leaves Scribe on its other Sources, with a warning, when GitHub fails", async () => {
