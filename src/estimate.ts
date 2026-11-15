@@ -76,6 +76,8 @@ function isBottomUp(section: string): boolean {
 export const WRITE_OUTPUT_TOKENS = 2000;
 export const VERDICT_OUTPUT_TOKENS = 500;
 export const SUMMARY_OUTPUT_TOKENS = 150;
+/** Assumed size of the answer naming the Evidence for each of a human's Claims, for the cost estimate; not measured. */
+export const ATTACH_OUTPUT_TOKENS = 500;
 
 /** Assumed size of a Drift search's answer, for the cost estimate; not measured. */
 export const DRIFT_OUTPUT_TOKENS = 500;

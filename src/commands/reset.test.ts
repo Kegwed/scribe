@@ -80,7 +80,7 @@ describe("reset", () => {
   it("clears an adopted Section's Unsupported Claims", async () => {
     const repo = await generated();
     repo.commit({ [A]: "# A\n\nA is fast.\n" });
-    await adopt(repo.dir, "modules/src-a", { llm: scriptedLlm("unused") });
+    await adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused") });
     expect((await status(repo.dir)).unsupportedClaims).toEqual([{ section: "modules/src-a", text: "A is fast." }]);
 
     await reset(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused") });

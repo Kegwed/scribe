@@ -6,6 +6,7 @@ import { createFixtureRepo, type Files } from "../test/fixture-repo.ts";
 import { fakeGitHub } from "../test/fake-github.ts";
 import { isSectionWrite, recordedLlm, scriptedLlm } from "../test/recorded-llm.ts";
 import { STABLE } from "../test/sections.ts";
+import type { CostEstimate } from "../estimate.ts";
 import { adopt } from "./adopt.ts";
 import { generate } from "./generate.ts";
 import { status } from "./status.ts";
@@ -72,7 +73,7 @@ describe("adopt against recorded responses", () => {
 
   it("keeps the Unsupported Claims of an adopted Section through update's revision of it", async () => {
     const { repo } = await humanPricing();
-    const { unsupportedClaims } = await adopt(repo.dir, "modules/src-pricing", { llm: recordedLlm("adopt") });
+    const { unsupportedClaims } = await adopt(repo.dir, "modules/src-pricing", {}, { llm: recordedLlm("adopt") });
     expect(unsupportedClaims.length).toBeGreaterThan(0);
     repo.commit({ "src/pricing/price.ts": PRICE.replace("Math.round", "Math.floor").replace('"EUR"', '"USD"') }, "adopt, then change pricing");
 
@@ -92,7 +93,7 @@ describe("adopt against recorded responses", () => {
   it("records Evidence for the human's Claims the code backs and keeps the rest as Unsupported", async () => {
     const { repo, mine } = await humanPricing();
 
-    const { unsupportedClaims } = await adopt(repo.dir, "modules/src-pricing", { llm: recordedLlm("adopt") });
+    const { unsupportedClaims } = await adopt(repo.dir, "modules/src-pricing", {}, { llm: recordedLlm("adopt") });
 
     expect(read(repo.dir, "docs/guide/modules/src-pricing.md")).toBe(mine);
     const sentences = ["roundPrice rounds a price to whole cents.", "Every price is in euros.", "The team plans to add more currencies next year."];
@@ -103,6 +104,73 @@ describe("adopt against recorded responses", () => {
     expect(ids.length).toBeGreaterThan(0);
     for (const id of ids) expect(["src/pricing/price.ts#roundPrice", "src/pricing/price.ts#CURRENCY"]).toContain(id);
     expect((await status(repo.dir)).sections[0]).toEqual(expect.objectContaining({ frozen: false, stale: false }));
+  });
+});
+
+describe("adopt's cost estimate", () => {
+  const ATTACHED = { attachments: { "A returns one.": ["src/a/a.ts#a"], "K is three.": ["src/a/a.ts#k"], "A is fast.": ["src/a/a.ts#a"] } };
+
+  it("names the Frozen Section; declining calls no LLM and changes no files, ignored ones included", async () => {
+    const repo = await generated();
+    repo.commit({ [A]: "# A\n\nA returns one. K is three.\n" });
+    const before = repo.git("status", "--porcelain", "--untracked-files=all", "--ignored");
+    const manifestBefore = read(repo.dir, ".scribe/manifest.json");
+    const llm = scriptedLlm("unused", {}, ATTACHED);
+    const asked: CostEstimate[] = [];
+
+    const result = await adopt(repo.dir, "modules/src-a", { confirm: async (estimate) => (asked.push(estimate), false) }, { llm });
+
+    expect(asked.map((e) => e.sections.map((s) => s.section))).toEqual([["modules/src-a"]]);
+    expect(asked[0]!.tokens).toBeGreaterThan(0);
+    expect(result.declined).toBe(true);
+    expect(llm.calls).toEqual([]);
+    expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe(before);
+    expect(read(repo.dir, ".scribe/manifest.json")).toBe(manifestBefore);
+  });
+
+  it("grows with the number of Claims in the Section's text", async () => {
+    const repo = await generated();
+    const tokensFor = async (mine: string) => {
+      repo.commit({ [A]: mine });
+      let tokens = 0;
+      await adopt(repo.dir, "modules/src-a", { confirm: async (estimate) => ((tokens = estimate.tokens), false) }, { llm: scriptedLlm("unused") });
+      return tokens;
+    };
+
+    const two = await tokensFor("# A\n\nA returns one. K is three.\n");
+    const three = await tokensFor("# A\n\nA returns one. K is three.\n\nA is fast.\n");
+
+    expect(two).toBeGreaterThan(0);
+    expect(three).toBeGreaterThan(two);
+  });
+
+  it("keeps a Frozen, Stale Section's Proposal when declined", async () => {
+    const repo = await generated();
+    repo.commit({ [A]: "# A\n\nA returns two.\n", "src/a/a.ts": "export function a() {\n  return 2;\n}\n\nexport const k = 3;\n" });
+    await update(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A returns two.", evidence: ["src/a/a.ts#a"] }] }] }) });
+    repo.commit({}, "propose A");
+
+    const result = await adopt(repo.dir, "modules/src-a", { confirm: async () => false }, { llm: scriptedLlm("unused") });
+
+    expect(result).toEqual({ unsupportedClaims: [], warnings: [], declined: true });
+    expect(existsSync(join(repo.dir, A_PROPOSAL))).toBe(true);
+    expect(repo.git("status", "--porcelain", "--untracked-files=all")).toBe("");
+  });
+
+  it("adopts without asking when every request it would send is cached", async () => {
+    const repo = await generated();
+    const mine = "# A\n\nA returns one. K is three.\n\nA is fast.\n";
+    repo.commit({ [A]: mine });
+    await adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused", { "A is fast.": { confirmed: false, reason: "nothing shows speed" } }, ATTACHED) });
+    repo.git("checkout", "--", ".");
+    let asked = false;
+    const llm = scriptedLlm("unused");
+
+    const result = await adopt(repo.dir, "modules/src-a", { confirm: async () => (asked = true) }, { llm });
+
+    expect(asked).toBe(false);
+    expect(llm.calls).toEqual([]);
+    expect(result).toEqual({ unsupportedClaims: [{ section: "modules/src-a", text: "A is fast." }], warnings: [], declined: false });
   });
 });
 
@@ -118,7 +186,7 @@ describe("adopt", () => {
       { attachments: { "A returns one.": ["src/a/a.ts#a"], "K is three.": ["src/a/a.ts#k"], "A is fast.": ["src/a/a.ts#a"] } },
     );
 
-    const result = await adopt(repo.dir, "modules/src-a", { llm });
+    const result = await adopt(repo.dir, "modules/src-a", {}, { llm });
 
     expect(read(repo.dir, A)).toBe(mine);
     expect(result.unsupportedClaims).toEqual([{ section: "modules/src-a", text: "A is fast." }]);
@@ -142,10 +210,10 @@ describe("adopt", () => {
     await update(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A returns two.", evidence: ["src/a/a.ts#a"] }] }] }) });
     expect(existsSync(join(repo.dir, A_PROPOSAL))).toBe(true);
 
-    const result = await adopt(repo.dir, "modules/src-a", { llm: scriptedLlm("unused", {}, { attachments: { "A returns two.": ["src/a/a.ts#a"] } }) });
+    const result = await adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused", {}, { attachments: { "A returns two.": ["src/a/a.ts#a"] } }) });
 
     expect(existsSync(join(repo.dir, A_PROPOSAL))).toBe(false);
-    expect(result).toEqual({ unsupportedClaims: [], clearedProposal: A_PROPOSAL, warnings: [] });
+    expect(result).toEqual({ unsupportedClaims: [], clearedProposal: A_PROPOSAL, warnings: [], declined: false });
     expect(read(repo.dir, A)).toBe(mine);
     const after = await status(repo.dir);
     expect(after.sections.find((s) => s.section === "modules/src-a")).toEqual(expect.objectContaining({ frozen: false, stale: false }));
@@ -160,7 +228,7 @@ describe("adopt", () => {
     repo.commit({ [A]: mine });
     const llm = scriptedLlm("unused", {}, { attachments: { "A gives back one.": ["src/a/a.ts#a"] } });
 
-    const result = await adopt(repo.dir, "modules/src-a", { llm });
+    const result = await adopt(repo.dir, "modules/src-a", {}, { llm });
 
     expect(result.unsupportedClaims).toEqual([{ section: "modules/src-a", text: "Read this first." }]);
     expect(read(repo.dir, A)).toBe(mine);
@@ -178,7 +246,7 @@ describe("adopt", () => {
       [C]: mine,
     });
 
-    const result = await adopt(repo.dir, "modules/src-c", { llm: scriptedLlm("unused", {}, { attachments: { "C is one.": ["src/c/c.ts#c"] } }) });
+    const result = await adopt(repo.dir, "modules/src-c", {}, { llm: scriptedLlm("unused", {}, { attachments: { "C is one.": ["src/c/c.ts#c"] } }) });
 
     expect(result.unsupportedClaims).toEqual([]);
     expect(read(repo.dir, C)).toBe(mine);
@@ -197,7 +265,7 @@ describe("adopt", () => {
       { attachments: { "A returns one.": ["src/a/a.ts#a"], "K is three.": ["src/a/a.ts#k"] } },
     );
 
-    const result = await adopt(repo.dir, "modules/src-a", { llm });
+    const result = await adopt(repo.dir, "modules/src-a", {}, { llm });
 
     expect(read(repo.dir, A)).toBe(before);
     expect(result.unsupportedClaims).toEqual([{ section: "modules/src-a", text: "A returns one." }]);
@@ -211,7 +279,7 @@ describe("adopt", () => {
     repo.commit({ [A]: `# A\n\nA returns one.\n\n${STABLE}[^1]\n\n[^1]: git history of src/a (90 days)\n` });
     const llm = scriptedLlm("unused", {}, { attachments: { "A returns one.": ["src/a/a.ts#a"] } });
 
-    const result = await adopt(repo.dir, "modules/src-a", { llm });
+    const result = await adopt(repo.dir, "modules/src-a", {}, { llm });
 
     expect(result.unsupportedClaims).toEqual([]);
     for (const call of llm.calls) expect(call.prompt).not.toContain(STABLE);
@@ -228,7 +296,7 @@ describe("adopt", () => {
     const github = fakeGitHub([{ number: 12, files: ["src/a/a.ts"], comments: ["Keep k a constant: callers cache it."] }]);
     const llm = scriptedLlm("unused", {}, { attachments: { "K stays a constant because callers cache it.": ["src/a/a.ts#k", "github:pr/12/comment/1201"] } });
 
-    const result = await adopt(repo.dir, "modules/src-a", { llm, github });
+    const result = await adopt(repo.dir, "modules/src-a", {}, { llm, github });
 
     expect(result.unsupportedClaims).toEqual([]);
     expect(manifest(repo.dir).sections["modules/src-a"].evidence.map((e: { id: string }) => e.id)).toEqual(["src/a/a.ts#k", "github:pr/12/comment/1201"]);
@@ -240,7 +308,7 @@ describe("adopt", () => {
     repo.commit({ [A]: "# A\n\nA returns one.\n" });
     const llm = scriptedLlm("unused", {}, { promptLimit: 600, attachments: { "A returns one.": ["src/a/a.ts#a"] } });
 
-    const result = await adopt(repo.dir, "modules/src-a", { llm });
+    const result = await adopt(repo.dir, "modules/src-a", {}, { llm });
 
     const [attach] = llm.calls.filter((call) => call.kind === "attach");
     expect(attach!.prompt.length).toBeLessThanOrEqual(600);
@@ -248,6 +316,7 @@ describe("adopt", () => {
     expect(result).toEqual({
       unsupportedClaims: [],
       warnings: ["The Evidence offered for modules/src-a's Claims left out src/a/helper.ts#helper to fit one request."],
+      declined: false,
     });
   });
 
@@ -256,7 +325,7 @@ describe("adopt", () => {
     repo.commit({ "src/b/b.ts": "// Nothing here yet.\n", [B]: "# B\n\nB is one.\n" });
     const llm = scriptedLlm("unused");
 
-    const result = await adopt(repo.dir, "modules/src-b", { llm });
+    const result = await adopt(repo.dir, "modules/src-b", {}, { llm });
 
     expect(llm.calls).toEqual([]);
     expect(result.unsupportedClaims).toEqual([{ section: "modules/src-b", text: "B is one." }]);
@@ -265,11 +334,11 @@ describe("adopt", () => {
   it("changes nothing and asks no LLM when adopting the same text again", async () => {
     const repo = await generated();
     repo.commit({ [A]: "# A\n\nA returns one.\n" });
-    await adopt(repo.dir, "modules/src-a", { llm: scriptedLlm("unused", {}, { attachments: { "A returns one.": ["src/a/a.ts#a"] } }) });
+    await adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused", {}, { attachments: { "A returns one.": ["src/a/a.ts#a"] } }) });
     repo.commit({}, "adopt A");
     const llm = scriptedLlm("unused");
 
-    await adopt(repo.dir, "modules/src-a", { llm });
+    await adopt(repo.dir, "modules/src-a", {}, { llm });
 
     expect(llm.calls).toEqual([]);
     expect(repo.git("status", "--porcelain")).toBe("");
@@ -280,7 +349,7 @@ describe("adopt", () => {
     async function adoptedThenChanged() {
       const repo = await generated();
       repo.commit({ [A]: "# A\n\nA returns one.[^1] A is fast.\n\n[^1]: my own note\n" });
-      await adopt(repo.dir, "modules/src-a", {
+      await adopt(repo.dir, "modules/src-a", {}, {
         llm: scriptedLlm("unused", { "A is fast.": { confirmed: false, reason: "nothing shows speed" } }, { attachments: { "A returns one.": ["src/a/a.ts#a"] } }),
       });
       repo.commit({ "src/a/a.ts": "export function a() {\n  return 2;\n}\n\nexport const k = 3;\n" }, "adopt A, change a");
@@ -318,7 +387,7 @@ describe("adopt", () => {
       const repo = await generated();
       const mine = "# A\n\nA returns one.[^1] A is fast.\n\n[^1]: my own note\n";
       repo.commit({ [A]: mine });
-      await adopt(repo.dir, "modules/src-a", {
+      await adopt(repo.dir, "modules/src-a", {}, {
         llm: scriptedLlm("unused", { "A is fast.": { confirmed: false, reason: "nothing shows speed" } }, { attachments: { "A returns one.": ["src/a/a.ts#a"] } }),
       });
 
@@ -346,7 +415,7 @@ describe("adopt", () => {
     const mine = "# Overview\n\nThe repo has two Modules.\n";
     repo.commit({ "docs/guide/overview.md": mine });
 
-    const result = await adopt(repo.dir, "overview", { llm: scriptedLlm("unused", {}, { attachments: { "The repo has two Modules.": ["graph:modules"] } }) });
+    const result = await adopt(repo.dir, "overview", {}, { llm: scriptedLlm("unused", {}, { attachments: { "The repo has two Modules.": ["graph:modules"] } }) });
 
     expect(result.unsupportedClaims).toEqual([]);
     expect(read(repo.dir, "docs/guide/overview.md")).toBe(mine);
@@ -360,7 +429,7 @@ describe("adopt", () => {
     repo.commit({ [`${A}/notes.txt`]: "A directory where the Section's file was.\n" });
     const before = manifest(repo.dir).sections["modules/src-a"];
 
-    await expect(adopt(repo.dir, "modules/src-a", { llm: scriptedLlm("unused") })).rejects.toThrow(/can't read docs\/guide\/modules\/src-a\.md/);
+    await expect(adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused") })).rejects.toThrow(/can't read docs\/guide\/modules\/src-a\.md/);
     expect(manifest(repo.dir).sections["modules/src-a"]).toEqual(before);
   });
 
@@ -368,14 +437,14 @@ describe("adopt", () => {
     const repo = await generated();
     repo.git("rm", "--quiet", A);
 
-    await expect(adopt(repo.dir, "modules/src-a", { llm: scriptedLlm("unused") })).rejects.toThrow(/scribe reset modules\/src-a/);
+    await expect(adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused") })).rejects.toThrow(/scribe reset modules\/src-a/);
   });
 
   it("refuses a Section no current Module has, such as a removed Module's", async () => {
     const repo = await generated();
     repo.commit({ "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }) });
 
-    await expect(adopt(repo.dir, "modules/src-b", { llm: scriptedLlm("unused") })).rejects.toThrow(/the Guide has no Section modules\/src-b/);
+    await expect(adopt(repo.dir, "modules/src-b", {}, { llm: scriptedLlm("unused") })).rejects.toThrow(/the Guide has no Section modules\/src-b/);
     expect(manifest(repo.dir).sections["modules/src-b"]).toBeDefined();
   });
 });

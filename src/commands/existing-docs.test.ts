@@ -189,7 +189,7 @@ describe("existing docs as a Source", () => {
       await generate(repo.dir, {}, { llm: llm() });
       repo.commit({ [SECTION]: "# Auth\n\ncreateSession takes a user.\n" });
 
-      await adopt(repo.dir, "modules/src-auth", { llm: llm() });
+      await adopt(repo.dir, "modules/src-auth", {}, { llm: llm() });
 
       expect((await status(repo.dir)).drift).toEqual([{ section: "modules/src-auth", ...DRIFT }]);
     });
