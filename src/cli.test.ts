@@ -1,5 +1,5 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -397,6 +397,50 @@ describe("scribe adopt and scribe reset", () => {
     expect(status).toBe(0);
   });
 
+  /** A generated, committed Guide whose Section A a human edited, with the cache gone so resetting it costs something. */
+  async function uncached() {
+    const repo = target();
+    await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] }) });
+    repo.commit({ "docs/guide/modules/src-a.md": "# A\n\nMy words.\n" });
+    rmSync(join(repo.dir, ".scribe/cache"), { recursive: true });
+    return repo;
+  }
+
+  it("reset prints the Section's estimate and, declined, writes nothing and exits 1", async () => {
+    const repo = await uncached();
+
+    const { status, stdout } = scribeWithInput(repo.dir, "n\n", "reset", "modules/src-a");
+
+    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 1 Section, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\nContinue\? \[y\/N\] /);
+    expect(stdout).toMatch(/Cancelled; no LLM was called and nothing was written\.\n$/);
+    expect(status).toBe(1);
+    expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
+  });
+
+  it("reset declines when stdin closes without an answer", async () => {
+    const repo = await uncached();
+
+    const { status, stdout } = scribe(repo.dir, "reset", "modules/src-a");
+
+    expect(stdout).toContain("Continue? [y/N] ");
+    expect(stdout).toContain("Cancelled;");
+    expect(status).toBe(1);
+    expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
+  });
+
+  it("reset skips the prompt with --yes and goes on to call the LLM", async () => {
+    const repo = await uncached();
+
+    const { status, stdout, stderr } = scribe(repo.dir, "reset", "modules/src-a", "--yes");
+
+    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 1 Section/);
+    expect(stdout).not.toContain("Continue?");
+    expect(stdout).not.toContain("Cancelled;");
+    // Claude's endpoint is unreachable, so reaching the LLM is what fails the run.
+    expect(stderr).toMatch(/^scribe: /m);
+    expect(status).toBe(1);
+  });
+
   describe("adopt's cost estimate", () => {
     /** A generated, then rewritten by a human: "A is one." the code backs, "A is fast." it doesn't. */
     async function frozen() {
@@ -447,6 +491,15 @@ describe("scribe adopt and scribe reset", () => {
       expect(status).toBe(1);
     }
   });
+});
+
+it("scribe --help says which commands print an estimate and ask, and that --yes skips asking", () => {
+  const repo = createFixtureRepo({});
+
+  const { status, stderr } = scribe(repo.dir, "--help");
+
+  expect(stderr).toContain("generate, update, reset and adopt print a cost estimate and ask before calling the LLM; --yes skips asking.");
+  expect(status).toBe(0);
 });
 
 it("scribe init prints the detected Modules and their public surface", () => {
