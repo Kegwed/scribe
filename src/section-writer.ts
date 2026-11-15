@@ -7,7 +7,7 @@ import { modelsOf } from "./config.ts";
 import { CONVENTIONS, conventionsEvidence, hasConventions } from "./conventions.ts";
 import { docsAbout, isDoc } from "./docs.ts";
 import { DRIFT_SCHEMA, DRIFT_SYSTEM, driftPrompt, parseDrift, VERIFY_DRIFT_SYSTEM } from "./drift.ts";
-import { DRIFT_OUTPUT_TOKENS, type SectionCost, SUMMARY_OUTPUT_TOKENS, totalCost, VERDICT_OUTPUT_TOKENS, WRITE_OUTPUT_TOKENS } from "./estimate.ts";
+import { ATTACH_OUTPUT_TOKENS, DRIFT_OUTPUT_TOKENS, type SectionCost, SUMMARY_OUTPUT_TOKENS, totalCost, VERDICT_OUTPUT_TOKENS, WRITE_OUTPUT_TOKENS } from "./estimate.ts";
 import { type Evidence, inFile, isRepoEvidence } from "./evidence.ts";
 import { ASSUMED_SUMMARY, finishFit, type FitPlan, type FittedPrompt, keepCodeRank, parseSummary, planFit, summaryRequests, wholeFit } from "./fit.ts";
 import { GETTING_STARTED, unmatchedCommands } from "./getting-started.ts";
@@ -80,6 +80,13 @@ export interface SectionWriter {
    * recorded as Unsupported Claims, which it returns (ADR-0002).
    */
   adopt(section: string, content: string): Promise<string[]>;
+  /**
+   * What `adopt` would cost for `content`: finding its Claims' Evidence, one
+   * verdict per Claim and the Drift search; cached requests cost nothing. Until
+   * the Evidence is found, each verdict is estimated without the Evidence it
+   * will carry, so the estimate understates it.
+   */
+  estimateAdopt(section: string, content: string): SectionCost;
 }
 
 /** What a Section is written from, and how its prompts present that Evidence. */
@@ -403,6 +410,12 @@ export function sectionWriter(
    * would leave it out.
    */
   async function attach(section: string, about: Subject, claims: string[]): Promise<string[][]> {
+    const { request, leftOut } = attachRequest(about, claims);
+    if (leftOut.length > 0) report.warnings.push(`The Evidence offered for ${section}'s Claims left out ${leftOut.join(", ")} to fit one request.`);
+    return completeCached(llm, repoDir, request, (response) => parseAttachments(response, claims.length));
+  }
+
+  function attachRequest(about: Subject, claims: string[]): { request: LlmRequest; leftOut: string[] } {
     const { prompt, leftOut } = wholeFit(
       about.items,
       about.render,
@@ -410,9 +423,14 @@ export function sectionWriter(
       llm.promptLimit,
       keepCodeRank,
     );
-    if (leftOut.length > 0) report.warnings.push(`The Evidence offered for ${section}'s Claims left out ${leftOut.join(", ")} to fit one request.`);
-    const request: LlmRequest = { kind: "attach", model: models.verify, system: ATTACH_SYSTEM, prompt, schema: ATTACH_SCHEMA };
-    return completeCached(llm, repoDir, request, (response) => parseAttachments(response, claims.length));
+    return { request: { kind: "attach", model: models.verify, system: ATTACH_SYSTEM, prompt, schema: ATTACH_SCHEMA }, leftOut };
+  }
+
+  /** A human's Claims in `content`, less Scribe's churn Claim when they kept it as it is now, which no model checks. */
+  function adoptedClaims(about: Subject, content: string): { texts: string[]; churnKept: ChurnEvidence | undefined } {
+    const sentences = humanClaims(content);
+    const churnKept = about.churn !== undefined && sentences.includes(about.churn.statement) ? about.churn : undefined;
+    return { texts: sentences.filter((text) => text !== churnKept?.statement), churnKept };
   }
 
   /** Writes `content` to `path` unless `previous` differs from it only in where its links pin; returns whether it wrote. */
@@ -458,13 +476,38 @@ export function sectionWriter(
           ),
         ] : []),
       ];
-      const { tokens, dollars, unpriced } = totalCost(costs.map((c) => ({
-        section,
-        tokens: c.tokens,
-        dollars: c.dollars ?? 0,
-        unpriced: c.dollars === undefined ? [c.model] : [],
-      })));
-      return { section, tokens, dollars, unpriced };
+      return sectionCost(section, costs);
+    },
+
+    estimateAdopt(section, content) {
+      const about = subject(section);
+      const { texts } = adoptedClaims(about, content);
+      const costs: ReturnType<typeof estimateCost>[] = [];
+      let claims: Claim[] | undefined = texts.map((text) => ({ text, evidence: [] }));
+      if (texts.length > 0 && about.evidence.size > 0) {
+        const { request } = attachRequest(about, texts);
+        const cached = readCached(repoDir, request);
+        if (cached === undefined) {
+          costs.push(estimateCost(request, ATTACH_OUTPUT_TOKENS));
+          claims = undefined;
+        } else {
+          const attached = parseAttachments(cached, texts.length);
+          claims = texts.map((text, i) => ({ text, evidence: attached[i]! }));
+        }
+      }
+      const verdicts = claims
+        ? claims.flatMap((claim) => {
+          const verdict = verdictRequest(models.verify, claim, about);
+          return "request" in verdict && !isCached(repoDir, verdict.request) ? [verdict.request] : [];
+        })
+        // Which Evidence each Claim cites is unknown until it is found, so its verdict is estimated without any.
+        : texts.map((text): LlmRequest => ({
+          kind: "verdict", model: models.verify, system: about.verifySystem([]), prompt: verifyPrompt({ text, evidence: [] }, [], about.render), schema: VERDICT_SCHEMA,
+        }));
+      costs.push(...verdicts.map((request) => estimateCost(request, VERDICT_OUTPUT_TOKENS)));
+      const drift = driftRequest(section)?.request;
+      if (drift && !isCached(repoDir, drift)) costs.push(estimateCost(drift, DRIFT_OUTPUT_TOKENS));
+      return sectionCost(section, costs);
     },
 
     async write(section, existing, changedEvidence) {
@@ -500,9 +543,7 @@ export function sectionWriter(
       const about = subject(section);
       const { evidence } = about;
       // A human who kept Scribe's churn Claim as it is now keeps its Evidence: it is true by construction, so no model checks it.
-      const sentences = humanClaims(content);
-      const churnKept = about.churn !== undefined && sentences.includes(about.churn.statement) ? about.churn : undefined;
-      const texts = sentences.filter((text) => text !== churnKept?.statement);
+      const { texts, churnKept } = adoptedClaims(about, content);
       const attached = texts.length === 0 || evidence.size === 0
         ? texts.map(() => [])
         : await attach(section, about, texts);
@@ -531,27 +572,43 @@ export function sectionWriter(
   };
 }
 
+/** A cost estimate of one Section, from the estimates of the requests it would send. */
+function sectionCost(section: string, costs: ReturnType<typeof estimateCost>[]): SectionCost {
+  const { tokens, dollars, unpriced } = totalCost(costs.map((c) => ({
+    section,
+    tokens: c.tokens,
+    dollars: c.dollars ?? 0,
+    unpriced: c.dollars === undefined ? [c.model] : [],
+  })));
+  return { section, tokens, dollars, unpriced };
+}
+
+/** The verifier's request for a Claim, or why it fails before any model sees it. */
+function verdictRequest(
+  model: string,
+  claim: Claim,
+  { evidence, check, verifySystem, render, uncited }: Subject,
+): { request: LlmRequest } | { failed: string } {
+  const failed = check?.(claim);
+  if (failed !== undefined) return { failed };
+  const cited = [...new Set(claim.evidence)].flatMap((id) => evidence.get(id) ?? []);
+  if (cited.length === 0) return { failed: uncited };
+  return { request: { kind: "verdict", model, system: verifySystem(cited), prompt: verifyPrompt(claim, cited, render), schema: VERDICT_SCHEMA } };
+}
+
 /** Why each Claim failed verification; a Claim not listed is confirmed by its cited Evidence. */
 async function verifySection(
   llm: Llm,
   model: string,
   repoDir: string,
   { paragraphs }: SectionResponse,
-  { evidence, check, verifySystem, render, uncited }: Subject,
+  about: Subject,
 ): Promise<Map<Claim, string>> {
   const claims = paragraphs.flatMap((p) => p.claims);
   const reasons = await Promise.all(claims.map(async (claim) => {
-    const failed = check?.(claim);
-    if (failed !== undefined) return failed;
-    const cited = [...new Set(claim.evidence)].flatMap((id) => evidence.get(id) ?? []);
-    if (cited.length === 0) return uncited;
-    const { confirmed, reason } = await completeCached(llm, repoDir, {
-      kind: "verdict",
-      model,
-      system: verifySystem(cited),
-      prompt: verifyPrompt(claim, cited, render),
-      schema: VERDICT_SCHEMA,
-    }, parseVerdict);
+    const verdict = verdictRequest(model, claim, about);
+    if ("failed" in verdict) return verdict.failed;
+    const { confirmed, reason } = await completeCached(llm, repoDir, verdict.request, parseVerdict);
     return confirmed ? undefined : reason;
   }));
   // In Claim order, not answer order: the repair prompt lists these, and that prompt is a cache key.

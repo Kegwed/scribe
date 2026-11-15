@@ -1,10 +1,11 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { adopt } from "./commands/adopt.ts";
 import { generate } from "./commands/generate.ts";
+import { fakeClaude } from "./test/fake-claude.ts";
 import { createFixtureRepo } from "./test/fixture-repo.ts";
 import { scriptedLlm } from "./test/recorded-llm.ts";
 
@@ -30,6 +31,23 @@ function run(dir: string, { input = "", key }: { input?: string; key?: string },
     env: { ...env, ANTHROPIC_BASE_URL: "http://127.0.0.1:9", ...(key === undefined ? {} : { ANTHROPIC_API_KEY: key }) },
   });
   return { status, stdout, stderr };
+}
+
+/** Runs the CLI with a dummy API key against the Claude endpoint at `url`, without blocking, so a fake in this process can answer. */
+function scribeAgainst(url: string, dir: string, ...args: string[]): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  const child = spawn(process.execPath, [cli, ...args], {
+    cwd: dir,
+    env: { ...process.env, ANTHROPIC_BASE_URL: url, ANTHROPIC_API_KEY: "sk-ant-dummy" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk) => (stdout += chunk));
+  child.stderr.setEncoding("utf8").on("data", (chunk) => (stderr += chunk));
+  return new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
 }
 
 describe("a missing ANTHROPIC_API_KEY", () => {
@@ -237,7 +255,7 @@ describe("scribe status", () => {
   it("lists an adopted Section's Unsupported Claims but exits 0", async () => {
     const repo = await generated();
     repo.commit({ "docs/guide/modules/src-b.md": "# B\n\nB is fast.\n" });
-    await adopt(repo.dir, "modules/src-b", { llm: scriptedLlm("unused") });
+    await adopt(repo.dir, "modules/src-b", {}, { llm: scriptedLlm("unused") });
 
     const { status, stdout } = scribe(repo.dir, "status");
 
@@ -353,7 +371,7 @@ describe("scribe adopt and scribe reset", () => {
     await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] }) });
     repo.commit({ "docs/guide/modules/src-a.md": "# A\n\nA is fast.\n", "docs/guide/modules/src-a.proposal.md": "# A\n\nA is one.\n" });
     // Adopted once in-process to fill the git-ignored cache, then undone, so the CLI needs no LLM.
-    await adopt(repo.dir, "modules/src-a", { llm: scriptedLlm("unused") });
+    await adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused") });
     repo.git("checkout", "--quiet", "--", ".");
 
     const { status, stdout } = scribe(repo.dir, "adopt", "modules/src-a");
@@ -421,6 +439,47 @@ describe("scribe adopt and scribe reset", () => {
     // Claude's endpoint is unreachable, so reaching the LLM is what fails the run.
     expect(stderr).toMatch(/^scribe: /m);
     expect(status).toBe(1);
+  });
+
+  describe("adopt's cost estimate", () => {
+    /** A generated, then rewritten by a human: "A is one." the code backs, "A is fast." it doesn't. */
+    async function frozen() {
+      const repo = target();
+      await generate(repo.dir, {}, { llm: scriptedLlm({ paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] }) });
+      repo.commit({ "docs/guide/modules/src-a.md": "# A\n\nA is one. A is fast.\n" });
+      return repo;
+    }
+
+    it("prints the estimate naming the Section and, declined, writes nothing and exits non-zero", async () => {
+      const repo = await frozen();
+      const before = repo.git("status", "--porcelain", "--untracked-files=all", "--ignored");
+
+      const { status, stdout } = scribeWithInput(repo.dir, "n\n", "adopt", "modules/src-a");
+
+      expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 1 Section, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\nContinue\? \[y\/N\] Cancelled; no LLM was called and nothing was written\.\n$/);
+      expect(status).toBe(1);
+      expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe(before);
+    });
+
+    it("skips the prompt with --yes and adopts the Section, recording its Evidence and Unsupported Claims", async () => {
+      const repo = await frozen();
+      const claude = await fakeClaude(({ prompt, schema }) =>
+        JSON.stringify(schema).includes("attachments")
+          ? { attachments: [...prompt.matchAll(/<claim index="(\d+)">/g)].map(([, i]) => ({ claim: Number(i), evidence: ["src/a/a.ts#a"] })) }
+          : prompt.includes("A is fast.") ? { confirmed: false, reason: "nothing shows speed" } : { confirmed: true, reason: "a is 1" });
+      try {
+        const { status, stdout } = await scribeAgainst(claude.url, repo.dir, "adopt", "modules/src-a", "--yes");
+
+        expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 1 Section, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\nUnsupported Claim, kept: A is fast\.\nAdopted modules\/src-a\.\n$/);
+        expect(status).toBe(0);
+        expect(claude.requests.length).toBeGreaterThan(0);
+        const record = JSON.parse(readFileSync(join(repo.dir, ".scribe/manifest.json"), "utf8")).sections["modules/src-a"];
+        expect(record.evidence.map((e: { id: string }) => e.id)).toEqual(["src/a/a.ts#a"]);
+        expect(record.unsupportedClaims).toEqual(["A is fast."]);
+      } finally {
+        await claude.close();
+      }
+    });
   });
 
   it("adopt and reset without a Section print usage and exit 1", () => {
