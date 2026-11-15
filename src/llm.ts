@@ -45,9 +45,9 @@ export interface RequestCost {
   dollars: number | undefined;
 }
 
-/** The tokens a request is expected to send, approximated from its length. */
-export function inputTokens(request: LlmRequest): number {
-  return approximateTokens(request.system + request.prompt + JSON.stringify(request.schema));
+/** The tokens a request is expected to send, approximated from its length, `extraChars` more for text it will carry but doesn't yet. */
+export function inputTokens(request: LlmRequest, extraChars = 0): number {
+  return approximateTokens(request.system + request.prompt + JSON.stringify(request.schema), extraChars);
 }
 
 /** What `input` tokens sent to `model` and `output` tokens back cost. */
@@ -59,10 +59,10 @@ export function priceTokens(model: string, input: number, output: number): Reque
 /**
  * A rough token count. Claude's tokenizer counted about 2.4 characters a token
  * on the code and prose of Scribe's prompts for honojs/hono, far fewer than
- * the four often assumed for English.
+ * the four often assumed for English. `extraChars` counts text not in hand.
  */
-export function approximateTokens(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
+export function approximateTokens(text: string, extraChars = 0): number {
+  return Math.ceil((text.length + extraChars) / CHARS_PER_TOKEN);
 }
 
 const CHARS_PER_TOKEN = 2.4;

@@ -1,4 +1,5 @@
-import type { LlmRequest } from "./llm.ts";
+import type { Evidence } from "./evidence.ts";
+import { estimateCost, inputTokens, type LlmRequest, priceTokens, type RequestCost } from "./llm.ts";
 import { BOTTOM_UP } from "./prompts.ts";
 
 /** What estimates one Section's cost, as a SectionWriter does. */
@@ -43,18 +44,47 @@ export interface SectionCost {
 }
 
 export function totalCost(sections: SectionCost[]): CostEstimate {
-  const requests: RequestCounts = {};
-  for (const s of sections) {
-    for (const [kind, count] of Object.entries(s.requests) as [LlmRequest["kind"], number][]) requests[kind] = (requests[kind] ?? 0) + count;
-  }
   return {
     sections,
     tokens: sections.reduce((sum, s) => sum + s.tokens, 0),
     dollars: sections.reduce((sum, s) => sum + s.dollars, 0),
     unpriced: [...new Set(sections.flatMap((s) => s.unpriced))],
-    requests,
+    requests: countByKind(sections.flatMap((s) => Object.entries(s.requests) as [LlmRequest["kind"], number][])),
     claims: sections.reduce((sum, s) => sum + s.claims, 0),
   };
+}
+
+/** Requests of `kind` expected `count` times, a fraction when they may not be sent at all, at `cost` each. */
+export interface ExpectedRequests {
+  kind: LlmRequest["kind"];
+  count: number;
+  cost: RequestCost;
+}
+
+function oneRequest(kind: LlmRequest["kind"], cost: RequestCost): ExpectedRequests {
+  return { kind, count: 1, cost };
+}
+
+/** A cost estimate of one Section, from the requests it is expected to send and the Claims it is expected to make. */
+export function sectionCost(section: string, expected: ExpectedRequests[], claims: number): SectionCost {
+  const sent = expected.filter(({ count }) => count > 0);
+  let tokens = 0;
+  let dollars = 0;
+  const unpriced = new Set<string>();
+  for (const { count, cost } of sent) {
+    tokens += cost.tokens * count;
+    if (cost.dollars === undefined) unpriced.add(cost.model);
+    else dollars += cost.dollars * count;
+  }
+  const requests = countByKind(sent.map(({ kind, count }) => [kind, count]));
+  return { section, tokens: Math.round(tokens), dollars, unpriced: [...unpriced], requests, claims };
+}
+
+/** The requests of each kind, summed. */
+function countByKind(counts: [LlmRequest["kind"], number][]): RequestCounts {
+  const requests: RequestCounts = {};
+  for (const [kind, count] of counts) requests[kind] = (requests[kind] ?? 0) + count;
+  return requests;
 }
 
 /** Asked with a run's estimate before any LLM call; the run goes ahead only on true. */
@@ -97,6 +127,102 @@ function isBottomUp(section: string): boolean {
   return Object.hasOwn(BOTTOM_UP, section);
 }
 
+/** A symbol's summary. */
+export function summaryRequest(request: LlmRequest): ExpectedRequests {
+  return oneRequest("summary", estimateCost(request, SUMMARY_OUTPUT_TOKENS));
+}
+
+/** The request naming the Evidence for each of a human's Claims. */
+export function attachRequest(request: LlmRequest): ExpectedRequests {
+  return oneRequest("attach", estimateCost(request, ATTACH_OUTPUT_TOKENS));
+}
+
+/** A search of a Module's docs and code for Drift. */
+export function driftSearch(request: LlmRequest): ExpectedRequests {
+  return oneRequest("drift", estimateCost(request, DRIFT_OUTPUT_TOKENS));
+}
+
+/** A verdict for each of `requests`. */
+export function verdicts(requests: LlmRequest[]): ExpectedRequests[] {
+  return requests.map((request) => oneRequest("verdict", verdictCost(request)));
+}
+
+/** The share of a Section's Claims a write is expected to verify anew, and the share of those expected to fail. */
+export interface Verification {
+  share: number;
+  failureRate: number;
+}
+
+/**
+ * How a write is expected to be verified: all its Claims at the first write's
+ * rate, unless it is a revision given `changedEvidence`, whose Claims citing
+ * only unchanged Evidence keep their cached verdicts, and whose new Claims
+ * fail more rarely.
+ */
+export function expectedVerification(sent: Evidence[], changedEvidence: string[] | undefined): Verification {
+  if (!changedEvidence) return { share: 1, failureRate: CLAIM_FAILURE_RATE };
+  const changed = new Set(changedEvidence);
+  return { share: sent.filter((e) => changed.has(e.id)).length / Math.max(sent.length, 1), failureRate: REVISION_FAILURE_RATE };
+}
+
+/**
+ * A Section's write from `request` and the Claims it is expected to make: the
+ * first write, the Section's one repair, sent when any Claim fails, and their
+ * verdicts at `verdict` each.
+ */
+export function expectedWrite(
+  request: LlmRequest,
+  { share, failureRate }: Verification,
+  verdict: RequestCost,
+): { claims: number; requests: ExpectedRequests[] } {
+  const input = inputTokens(request);
+  const claims = expectedClaims(input);
+  const output = claims * OUTPUT_TOKENS_PER_CLAIM;
+  // A revision keeps the Claims its changed Evidence doesn't touch, whose verdicts are cached; only the rest are verified anew.
+  const verified = claims * share;
+  const failing = verified * failureRate;
+  // The repair's prompt carries the first prompt, the first answer and why each Claim failed.
+  const repairChance = 1 - (1 - failureRate) ** verified;
+  const repairInput = input + output + (repairChance > 0 ? (failing / repairChance) * FAILURE_TOKENS : 0);
+  return {
+    claims,
+    requests: [
+      oneRequest("write", priceTokens(request.model, input, output)),
+      { kind: "write", count: repairChance, cost: priceTokens(request.model, repairInput, output) },
+      // The first verification's verdicts, then those of the Claims the repair rewrote.
+      { kind: "verdict", count: verified + failing, cost: verdict },
+    ],
+  };
+}
+
+/**
+ * The characters of prose, citations stripped, that a Module Section written
+ * from `request` is expected to have: those of the Claims it is expected to make.
+ */
+export function expectedProseChars(request: LlmRequest): number {
+  return Math.round(expectedClaims(inputTokens(request)) * SECTION_CHARS_PER_CLAIM);
+}
+
+/**
+ * A verdict on a Claim not yet written, from `request`, built with an empty
+ * Claim citing nothing: it is expected to carry a Module Section's prose per
+ * Claim, and about `CITED_PER_CLAIM` pieces of the average size of `evidence`,
+ * rendered as the verifier sees them.
+ */
+export function unwrittenVerdict(request: LlmRequest, evidence: string[]): RequestCost {
+  return verdictCost(request, SECTION_CHARS_PER_CLAIM + citedChars(evidence));
+}
+
+/** A verdict from `request`, `extraChars` longer than it is for text it will carry. */
+function verdictCost(request: LlmRequest, extraChars = 0): RequestCost {
+  return priceTokens(request.model, inputTokens(request, extraChars), VERDICT_OUTPUT_TOKENS);
+}
+
+/** The characters of about `CITED_PER_CLAIM` pieces of the average size of `evidence`. */
+function citedChars(evidence: string[]): number {
+  return Math.round((evidence.join("").length / Math.max(evidence.length, 1)) * Math.min(CITED_PER_CLAIM, evidence.length));
+}
+
 /*
  * The sizes and rates below were measured on a `generate` of honojs/hono
  * (9 Modules, 14 Sections, 687 requests) and the `update` after it.
@@ -107,32 +233,32 @@ function isBottomUp(section: string): boolean {
  * more Evidence gives more Claims, though far from in proportion. On hono, a
  * prompt of about 7,000 tokens gave about 15 Claims, and one of 165,000 gave 45.
  */
-export function expectedClaims(promptTokens: number): number {
+function expectedClaims(promptTokens: number): number {
   return 0.67 * Math.max(promptTokens, 1) ** 0.35;
 }
 
 /** Output tokens a write spends per Claim, citations included; about 126 on hono's first writes and 172 on its repairs. */
-export const OUTPUT_TOKENS_PER_CLAIM = 150;
+const OUTPUT_TOKENS_PER_CLAIM = 150;
 /** Characters of a Module Section's prose per Claim, once its citations are stripped: about 180 on hono. */
-export const SECTION_CHARS_PER_CLAIM = 180;
+const SECTION_CHARS_PER_CLAIM = 180;
 /** The share of Claims a first verification fails, each failure calling for the Section's one repair: 76 of 259 on hono. */
-export const CLAIM_FAILURE_RATE = 0.3;
+const CLAIM_FAILURE_RATE = 0.3;
 /**
  * The share of a revision's newly verified Claims that fail: none of 31 on
  * hono's `update`, since a revision builds on Claims already verified; assumed
  * one in twenty.
  */
-export const REVISION_FAILURE_RATE = 0.05;
+const REVISION_FAILURE_RATE = 0.05;
 /** Tokens a repair prompt adds per failed Claim, for its text and the verifier's reason. */
-export const FAILURE_TOKENS = 150;
+const FAILURE_TOKENS = 150;
 /** Output tokens of one verdict: about 450 on hono. */
-export const VERDICT_OUTPUT_TOKENS = 450;
+const VERDICT_OUTPUT_TOKENS = 450;
 /** Pieces of Evidence a Claim is expected to cite, so its verdict carries them. */
-export const CITED_PER_CLAIM = 2;
+const CITED_PER_CLAIM = 2;
 /** Output tokens of one summary: about 210 on hono. */
-export const SUMMARY_OUTPUT_TOKENS = 200;
+const SUMMARY_OUTPUT_TOKENS = 200;
 /** Assumed size of the answer naming the Evidence for each of a human's Claims, for the cost estimate; not measured. */
-export const ATTACH_OUTPUT_TOKENS = 500;
+const ATTACH_OUTPUT_TOKENS = 500;
 
 /** Assumed size of a Drift search's answer, for the cost estimate; most find nothing. */
-export const DRIFT_OUTPUT_TOKENS = 500;
+const DRIFT_OUTPUT_TOKENS = 500;
