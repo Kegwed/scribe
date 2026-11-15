@@ -45,6 +45,14 @@ describe("scribe generate's cost estimate", () => {
     expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
   });
 
+  it("says in one stderr line that the GitHub Source is off because origin isn't on GitHub", () => {
+    const repo = target();
+
+    const { stderr } = scribeWithInput(repo.dir, "n\n", "generate");
+
+    expect(stderr).toBe("warning: the GitHub Source is off because `origin` isn't on GitHub; there's nothing to fix.\n");
+  });
+
   it("declines when stdin closes without an answer", () => {
     const repo = target();
 
@@ -63,7 +71,7 @@ describe("scribe generate's cost estimate", () => {
     expect(stdout).not.toContain("Continue?");
     expect(stdout).not.toContain("Cancelled;");
     // No API key is set, so reaching the LLM is what fails the run.
-    expect(stderr).toMatch(/^scribe: /);
+    expect(stderr).toMatch(/^scribe: /m);
     expect(status).toBe(1);
   });
 });
