@@ -224,41 +224,43 @@ function citedChars(evidence: string[]): number {
 }
 
 /*
- * The sizes and rates below were measured on a `generate` of honojs/hono
- * (9 Modules, 14 Sections, 687 requests) and the `update` after it.
+ * Each size and rate below is marked measured or assumed. "On hono" means the
+ * #28 measurement: a `generate` of honojs/hono (9 Modules, 14 Sections, 687
+ * requests) and the `update` after it, with Claude's usage logged per request.
  */
 
 /**
- * Claims a Section's write is expected to make, from the tokens of its prompt:
- * more Evidence gives more Claims, though far from in proportion. On hono, a
- * prompt of about 7,000 tokens gave about 15 Claims, and one of 165,000 gave 45.
+ * Claims a Section's write is expected to make, from the tokens of its prompt.
+ * Measured: on hono, a prompt of about 7,000 tokens gave about 15 Claims, and
+ * one of 165,000 gave 45; this curve fits both.
  */
 function expectedClaims(promptTokens: number): number {
   return 0.67 * Math.max(promptTokens, 1) ** 0.35;
 }
 
-/** Output tokens a write spends per Claim, citations included; about 126 on hono's first writes and 172 on its repairs. */
+/** Output tokens a write spends per Claim, citations included. Measured: about 126 on hono's first writes and 172 on its repairs. */
 const OUTPUT_TOKENS_PER_CLAIM = 150;
-/** Characters of a Module Section's prose per Claim, once its citations are stripped: about 180 on hono. */
+/** Characters of a Module Section's prose per Claim, once its citations are stripped. Measured: about 180 on hono. */
 const SECTION_CHARS_PER_CLAIM = 180;
-/** The share of Claims a first verification fails, each failure calling for the Section's one repair: 76 of 259 on hono. */
+/** The share of Claims a first verification fails, each failure calling for the Section's one repair. Measured: 76 of 259 on hono. */
 const CLAIM_FAILURE_RATE = 0.3;
 /**
- * The share of a revision's newly verified Claims that fail: none of 31 on
- * hono's `update`, since a revision builds on Claims already verified; assumed
- * one in twenty.
+ * The share of a revision's newly verified Claims that fail. Assumed: hono's
+ * `update` failed none of 31, too few to measure a rate from.
  */
 const REVISION_FAILURE_RATE = 0.05;
-/** Tokens a repair prompt adds per failed Claim, for its text and the verifier's reason. */
+/** Tokens a repair prompt adds per failed Claim, for its text and the verifier's reason. Assumed; not measured. */
 const FAILURE_TOKENS = 150;
-/** Output tokens of one verdict: about 450 on hono. */
+/** Output tokens of one verdict. Measured: about 450 on hono. */
 const VERDICT_OUTPUT_TOKENS = 450;
-/** Pieces of Evidence a Claim is expected to cite, so its verdict carries them. */
+/** Pieces of Evidence a Claim is expected to cite, so its verdict carries them. Assumed; not measured. */
 const CITED_PER_CLAIM = 2;
-/** Output tokens of one summary: about 210 on hono. */
+/** Output tokens of one summary. Measured: about 210 on hono. */
 const SUMMARY_OUTPUT_TOKENS = 200;
-/** Assumed size of the answer naming the Evidence for each of a human's Claims, for the cost estimate; not measured. */
+/** Output tokens of the answer naming the Evidence for each of a human's Claims. Assumed; not measured. */
 const ATTACH_OUTPUT_TOKENS = 500;
-
-/** Assumed size of a Drift search's answer, for the cost estimate; most find nothing. */
+/**
+ * Output tokens of a Drift search's answer. Assumed; not measured. Most answers
+ * are short: 8 of hono's 10 Drift searches found no Drift.
+ */
 const DRIFT_OUTPUT_TOKENS = 500;
