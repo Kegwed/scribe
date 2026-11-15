@@ -231,7 +231,7 @@ describe("generate: Key decisions", () => {
 
       repo.commit({ [SECTION]: "# Key decisions\n\nA file is simpler to back up.\n" });
       const llm = scriptedLlm({ paragraphs: [] }, {}, { attachments: { "A file is simpler to back up.": ["github:pr/12/comment/1201"] } });
-      const { unsupportedClaims } = await adopt(repo.dir, "key-decisions", { llm, github: fakeGitHub(pulls) });
+      const { unsupportedClaims } = await adopt(repo.dir, "key-decisions", {}, { llm, github: fakeGitHub(pulls) });
       expect(unsupportedClaims).toEqual([]);
     });
   });

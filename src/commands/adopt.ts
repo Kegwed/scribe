@@ -1,4 +1,5 @@
 import type { Adapters } from "../adapters.ts";
+import { confirmed, type CostEstimate, type RunOptions, totalCost } from "../estimate.ts";
 import { CACHE_DIR } from "../manifest.ts";
 import { emptyReport, sectionWriter } from "../section-writer.ts";
 import { clearProposal, sectionModule, openTarget, readSection, sectionDiscussions, sectionPath } from "../target.ts";
@@ -11,6 +12,8 @@ export interface AdoptResult {
   clearedProposal?: string;
   /** Problems the maintainer should fix by hand, such as GitHub being unreachable. */
   warnings: string[];
+  /** The estimate was declined, so no LLM was called and nothing was written. */
+  declined: boolean;
 }
 
 /**
@@ -21,6 +24,7 @@ export interface AdoptResult {
 export async function adopt(
   repoDir: string,
   section: string,
+  { confirm }: RunOptions,
   { llm, github }: Adapters,
 ): Promise<AdoptResult> {
   const target = await openTarget(repoDir);
@@ -28,16 +32,21 @@ export async function adopt(
   const path = sectionPath(target.config, section);
   const content = await readSection(repoDir, path);
   if (content === undefined) throw new Error(`${path} doesn't exist, so there is nothing to adopt; scribe reset ${section} writes it`);
-  await gitIgnore(repoDir, CACHE_DIR);
 
   const report = emptyReport();
   const { discussions, saveCache } = await sectionDiscussions(repoDir, section, module, github, report.warnings);
+  const writer = sectionWriter(repoDir, target, llm, report, discussions);
+  const estimate: CostEstimate = totalCost([writer.estimateAdopt(section, content)]);
+  if (!(await confirmed(estimate, confirm))) return { unsupportedClaims: [], warnings: report.warnings, declined: true };
+
+  await gitIgnore(repoDir, CACHE_DIR);
   await saveCache();
-  const unsupported = await sectionWriter(repoDir, target, llm, report, discussions).adopt(section, content);
+  const unsupported = await writer.adopt(section, content);
   const clearedProposal = await clearProposal(repoDir, target.config, section);
   return {
     unsupportedClaims: unsupported.map((text) => ({ section, text })),
     ...(clearedProposal ? { clearedProposal } : {}),
     warnings: report.warnings,
+    declined: false,
   };
 }

@@ -148,8 +148,9 @@ async function main(argv: string[]): Promise<number> {
       return proposals.length > 0 || sections.some((s) => s.added || s.removed || s.missing || s.stale) ? 1 : 0;
     }
     case "adopt": {
-      const { unsupportedClaims, clearedProposal, warnings } = await adopt(process.cwd(), section!, adapters());
+      const { declined, unsupportedClaims, clearedProposal, warnings } = await adopt(process.cwd(), section!, { confirm: confirmer(yes) }, adapters());
       for (const warning of warnings) console.error(`warning: ${warning}`);
+      if (declined) return cancelled();
       for (const { text } of unsupportedClaims) console.log(`Unsupported Claim, kept: ${text}`);
       if (clearedProposal) console.log(`Proposal deleted: ${clearedProposal}`);
       console.log(`Adopted ${section}.`);
