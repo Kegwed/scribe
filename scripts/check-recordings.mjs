@@ -1,12 +1,17 @@
 // Runs the whole test suite, then fails if a cassette holds a response no test asked for:
 // one left behind when its prompt changed. Makes no LLM calls. With --prune it deletes them instead.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+// A fresh clone or worktree has no node_modules.
+if (!existsSync(join(root, "node_modules/vitest/vitest.mjs"))) {
+  console.error("vitest isn't installed: run `npm ci` first.");
+  process.exit(1);
+}
 const cassettes = join(root, "src/test/cassettes");
 const used = mkdtempSync(join(tmpdir(), "scribe-used-keys-"));
 
