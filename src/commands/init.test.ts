@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { listProductCode, moduleOf } from "../modules.ts";
 import { createFixtureRepo, type FixtureRepo } from "../test/fixture-repo.ts";
 import { init } from "./init.ts";
 
@@ -73,6 +74,32 @@ describe("init", () => {
       { name: "api", path: "packages/api" },
       { name: "lint", path: "tools/lint" },
     ]);
+  });
+
+  it.each([".", "./"])("keeps the root package as a Module when a workspace pattern is %j", async (rootPattern) => {
+    const repo = createFixtureRepo({
+      "package.json": pkg("root"),
+      "pnpm-workspace.yaml": `packages:\n  - '${rootPattern}'\n  - 'packages/*'\n`,
+      "src/index.ts": "export const root = 1;\n",
+      "src/router/trie.ts": "export const trie = 1;\n",
+      "packages/api/package.json": pkg("api"),
+      "packages/api/src/index.ts": "export const api = 1;\n",
+    });
+
+    const result = await init(repo.dir);
+
+    expect(result.modules).toEqual([
+      { name: "root", path: "." },
+      { name: "api", path: "packages/api" },
+    ]);
+    const owners = Object.fromEntries(
+      listProductCode(repo.dir).sort().map((file) => [file, moduleOf(file, result.modules)?.path]),
+    );
+    expect(owners).toEqual({
+      "packages/api/src/index.ts": "packages/api",
+      "src/index.ts": ".",
+      "src/router/trie.ts": ".",
+    });
   });
 
   it("yields one Module per subdirectory of the Code root, plus one for files directly in it", async () => {

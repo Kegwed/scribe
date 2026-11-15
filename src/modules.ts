@@ -114,15 +114,21 @@ function parsePnpmPackages(yaml: string): string[] {
   return patterns;
 }
 
+/** A workspace pattern naming the root package, which `fs.glob` never yields. */
+const ROOT_PATTERN = /^\.\/?$/;
+
 async function workspaceModules(repoDir: string, patterns: string[]): Promise<Module[]> {
-  const include = patterns.filter((p) => !p.startsWith("!"));
+  const include = patterns.filter((p) => !p.startsWith("!") && !ROOT_PATTERN.test(p));
   const exclude = [
     ...patterns.filter((p) => p.startsWith("!")).map((p) => p.slice(1)),
     "**/node_modules",
   ];
 
+  const paths = patterns.some((p) => ROOT_PATTERN.test(p)) ? ["."] : [];
+  for await (const path of glob(include, { cwd: repoDir, exclude })) paths.push(path);
+
   const modules: Module[] = [];
-  for await (const path of glob(include, { cwd: repoDir, exclude })) {
+  for (const path of paths) {
     const packageJson = await readJson(join(repoDir, path, "package.json"));
     if (!packageJson) continue;
     modules.push({ name: packageJson.name ?? path, path: path.replaceAll("\\", "/") });
