@@ -1,9 +1,15 @@
 name: Check
 
-# Every branch, so an integration branch is checked as soon as it's pushed, before any PR.
+# Every branch, so an integration branch is checked as soon as it's pushed, before any PR. Tags are left to
+# the release workflow, which calls this one first, so nothing is published that fails here.
 on:
   push:
+    branches: ["**"]
   pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   check:
@@ -20,3 +26,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      # Packs the package, installs the tarball into an empty directory and runs scribe there.
+      - name: Packaging smoke test
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run smoke:pack
