@@ -1,8 +1,26 @@
 {
-  "name": "scribe",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@kegwed/scribe",
+  "version": "0.1.0",
   "description": "Generates evidence-grounded onboarding docs for a repository and keeps them current.",
+  "keywords": [
+    "documentation",
+    "onboarding",
+    "docs",
+    "llm",
+    "claude",
+    "cli",
+    "codebase"
+  ],
+  "homepage": "https://github.com/Kegwed/scribe#readme",
+  "bugs": {
+    "url": "https://github.com/Kegwed/scribe/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kegwed/scribe.git"
+  },
+  "license": "MIT",
+  "author": "Kegwed",
   "type": "module",
   "bin": {
     "scribe": "dist/cli.js"
@@ -13,6 +31,9 @@
   "engines": {
     "node": ">=24"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -20,7 +41,9 @@
     "check": "npm run typecheck && npm run build && node scripts/check-recordings.mjs",
     "record": "node scripts/record-cassettes.mjs",
     "eval": "node scripts/eval.mjs",
-    "prepare": "git config core.hooksPath .githooks"
+    "prepare": "git config core.hooksPath .githooks",
+    "prepack": "npm run build",
+    "smoke:pack": "node scripts/smoke-pack.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

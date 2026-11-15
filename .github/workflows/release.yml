@@ -1,0 +1,39 @@
+name: Release
+
+# Publishes @kegwed/scribe to npm when a v* tag is pushed, after the check passes.
+#
+# Uses npm trusted publishing (OIDC): no npm token is stored, and npm adds provenance.
+# A trusted publisher can only be configured for a package that already exists on npm
+# (https://docs.npmjs.com/cli/v12/commands/npm-trust, "Package must exist"), so 0.1.0 is
+# published once by hand. Then, on npmjs.com, add a trusted publisher for this repository
+# and this workflow file (release.yml) that allows `npm publish`, and every later release
+# goes through this workflow. See https://docs.npmjs.com/trusted-publishers.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    uses: ./.github/workflows/check.yml
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install --global npm@latest
+      - run: npm ci
+      # prepack builds dist/ before the tarball is made.
+      - run: npm publish --provenance --access public
