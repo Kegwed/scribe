@@ -123,6 +123,7 @@ describe("adopt's cost estimate", () => {
     expect(asked.map((e) => e.sections.map((s) => s.section))).toEqual([["modules/src-a"]]);
     expect(asked[0]!.tokens).toBeGreaterThan(0);
     expect(result.declined).toBe(true);
+    expect(result.estimate).toEqual(asked[0]);
     expect(llm.calls).toEqual([]);
     expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe(before);
     expect(read(repo.dir, ".scribe/manifest.json")).toBe(manifestBefore);
@@ -170,7 +171,7 @@ describe("adopt's cost estimate", () => {
 
     const result = await adopt(repo.dir, "modules/src-a", { confirm: async () => false }, { llm: scriptedLlm("unused") });
 
-    expect(result).toEqual({ unsupportedClaims: [], warnings: [], declined: true });
+    expect(result).toEqual({ unsupportedClaims: [], warnings: [], estimate: expect.anything(), declined: true });
     expect(existsSync(join(repo.dir, A_PROPOSAL))).toBe(true);
     expect(repo.git("status", "--porcelain", "--untracked-files=all")).toBe("");
   });
@@ -188,7 +189,7 @@ describe("adopt's cost estimate", () => {
 
     expect(asked).toBe(false);
     expect(llm.calls).toEqual([]);
-    expect(result).toEqual({ unsupportedClaims: [{ section: "modules/src-a", text: "A is fast." }], warnings: [], declined: false });
+    expect(result).toEqual({ unsupportedClaims: [{ section: "modules/src-a", text: "A is fast." }], warnings: [], estimate: expect.objectContaining({ tokens: 0 }), declined: false });
   });
 });
 
@@ -231,7 +232,7 @@ describe("adopt", () => {
     const result = await adopt(repo.dir, "modules/src-a", {}, { llm: scriptedLlm("unused", {}, { attachments: { "A returns two.": ["src/a/a.ts#a"] } }) });
 
     expect(existsSync(join(repo.dir, A_PROPOSAL))).toBe(false);
-    expect(result).toEqual({ unsupportedClaims: [], clearedProposal: A_PROPOSAL, warnings: [], declined: false });
+    expect(result).toEqual({ unsupportedClaims: [], clearedProposal: A_PROPOSAL, warnings: [], estimate: expect.anything(), declined: false });
     expect(read(repo.dir, A)).toBe(mine);
     const after = await status(repo.dir);
     expect(after.sections.find((s) => s.section === "modules/src-a")).toEqual(expect.objectContaining({ frozen: false, stale: false }));
@@ -334,6 +335,7 @@ describe("adopt", () => {
     expect(result).toEqual({
       unsupportedClaims: [],
       warnings: ["The Evidence offered for modules/src-a's Claims left out src/a/helper.ts#helper to fit one request."],
+      estimate: expect.anything(),
       declined: false,
     });
   });

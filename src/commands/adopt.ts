@@ -12,6 +12,8 @@ export interface AdoptResult {
   clearedProposal?: string;
   /** Problems the maintainer should fix by hand, such as GitHub being unreachable. */
   warnings: string[];
+  /** What adopting the Section was expected to cost. */
+  estimate: CostEstimate;
   /** The estimate was declined, so no LLM was called and nothing was written. */
   declined: boolean;
 }
@@ -37,7 +39,7 @@ export async function adopt(
   const { discussions, saveCache } = await sectionDiscussions(repoDir, section, module, github, report.warnings);
   const writer = sectionWriter(repoDir, target, llm, report, discussions);
   const estimate: CostEstimate = totalCost([writer.estimateAdopt(section, content)]);
-  if (!(await confirmed(estimate, confirm))) return { unsupportedClaims: [], warnings: report.warnings, declined: true };
+  if (!(await confirmed(estimate, confirm))) return { unsupportedClaims: [], warnings: report.warnings, estimate, declined: true };
 
   await gitIgnore(repoDir, CACHE_DIR);
   await saveCache();
@@ -47,6 +49,7 @@ export async function adopt(
     unsupportedClaims: unsupported.map((text) => ({ section, text })),
     ...(clearedProposal ? { clearedProposal } : {}),
     warnings: report.warnings,
+    estimate,
     declined: false,
   };
 }
