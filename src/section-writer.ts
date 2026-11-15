@@ -7,7 +7,7 @@ import { modelsOf } from "./config.ts";
 import { CONVENTIONS, conventionsEvidence, hasConventions } from "./conventions.ts";
 import { docsAbout, isDoc } from "./docs.ts";
 import { DRIFT_SCHEMA, DRIFT_SYSTEM, driftPrompt, parseDrift, VERIFY_DRIFT_SYSTEM } from "./drift.ts";
-import { attachRequest as attachCost, driftSearch, expectedProseChars, type ExpectedRequests, expectedVerification, expectedWrite, sectionCost, type SectionCost, summaryRequest, unwrittenVerdict, verdicts } from "./estimate.ts";
+import { attachRequest as attachCost, driftSearch, expectedProseChars, type ExpectedRequests, expectedVerification, expectedWrite, sectionCost, type SectionCost, summaryRequest, uncitedVerdict, unwrittenVerdict, verdicts } from "./estimate.ts";
 import { type Evidence, inFile, isRepoEvidence } from "./evidence.ts";
 import { ASSUMED_SUMMARY, finishFit, type FitPlan, type FittedPrompt, keepCodeRank, parseSummary, planFit, summaryRequests, wholeFit } from "./fit.ts";
 import { GETTING_STARTED, unmatchedCommands } from "./getting-started.ts";
@@ -539,14 +539,17 @@ export function sectionWriter(
           claims = texts.map((text, i) => ({ text, evidence: attached[i]! }));
         }
       }
-      const verdictRequests = claims
-        ? claims.flatMap((claim) => {
+      if (claims) {
+        expected.push(...verdicts(claims.flatMap((claim) => {
           const verdict = verdictRequest(models.verify, claim, about);
           return "request" in verdict && !isCached(repoDir, verdict.request) ? [verdict.request] : [];
-        })
-        // Which Evidence each Claim cites is unknown until it is found, so its verdict is estimated without any.
-        : texts.map((text) => verdictFor(models.verify, { text, evidence: [] }, [], about));
-      expected.push(...verdicts(verdictRequests), ...expectedDrift(section, about));
+        })));
+      } else {
+        // Which Evidence each Claim cites is unknown until it is found, so each verdict is expected to carry as much as a written Claim's.
+        const rendered = [...about.evidence.values()].map(about.render);
+        expected.push(...texts.map((text) => uncitedVerdict(verdictFor(models.verify, { text, evidence: [] }, [], about), rendered)));
+      }
+      expected.push(...expectedDrift(section, about));
       return sectionCost(section, expected, texts.length);
     },
 

@@ -144,6 +144,24 @@ describe("adopt's cost estimate", () => {
     expect(three).toBeGreaterThan(two);
   });
 
+  it("sizes each Claim's verdict with the Evidence it will cite, before that Evidence is found", async () => {
+    // About 3,000 characters more of the Module's Evidence, over 1,000 tokens.
+    const long = Array.from({ length: 100 }, (_, i) => `  // Step ${i} of a long body.\n`).join("");
+    const tokensFor = async (body: string, mine: string) => {
+      const repo = createFixtureRepo({ ...TARGET, "src/a/a.ts": `export function a() {\n${body}  return 1;\n}\n\nexport const k = 3;\n`, [A]: mine });
+      let tokens = 0;
+      await adopt(repo.dir, "modules/src-a", { confirm: async (estimate) => ((tokens = estimate.tokens), false) }, { llm: scriptedLlm("unused") });
+      return tokens;
+    };
+    const growth = async (mine: string) => (await tokensFor(long, mine)) - (await tokensFor("", mine));
+
+    const ofOne = await growth("# A\n\nA returns one.\n");
+    const ofThree = await growth("# A\n\nA returns one. K is three. A is fast.\n");
+
+    // Two more verdicts, each expected to carry its share of the longer Evidence.
+    expect(ofThree - ofOne).toBeGreaterThan(500);
+  });
+
   it("keeps a Frozen, Stale Section's Proposal when declined", async () => {
     const repo = await generated();
     repo.commit({ [A]: "# A\n\nA returns two.\n", "src/a/a.ts": "export function a() {\n  return 2;\n}\n\nexport const k = 3;\n" });

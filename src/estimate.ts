@@ -213,6 +213,11 @@ export function unwrittenVerdict(request: LlmRequest, evidence: string[]): Reque
   return verdictCost(request, SECTION_CHARS_PER_CLAIM + citedChars(evidence));
 }
 
+/** A verdict on a Claim whose Evidence isn't found yet, from `request`, built with the Claim citing nothing: it carries Evidence as `unwrittenVerdict`'s does. */
+export function uncitedVerdict(request: LlmRequest, evidence: string[]): ExpectedRequests {
+  return oneRequest("verdict", verdictCost(request, citedChars(evidence)));
+}
+
 /** A verdict from `request`, `extraChars` longer than it is for text it will carry. */
 function verdictCost(request: LlmRequest, extraChars = 0): RequestCost {
   return priceTokens(request.model, inputTokens(request, extraChars), VERDICT_OUTPUT_TOKENS);
