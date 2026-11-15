@@ -7,7 +7,7 @@ import { modelsOf } from "./config.ts";
 import { CONVENTIONS, conventionsEvidence, hasConventions } from "./conventions.ts";
 import { docsAbout, isDoc } from "./docs.ts";
 import { DRIFT_SCHEMA, DRIFT_SYSTEM, driftPrompt, parseDrift, VERIFY_DRIFT_SYSTEM } from "./drift.ts";
-import { ATTACH_OUTPUT_TOKENS, CITED_PER_CLAIM, CLAIM_FAILURE_RATE, DRIFT_OUTPUT_TOKENS, expectedClaims, FAILURE_TOKENS, OUTPUT_TOKENS_PER_CLAIM, type RequestCounts, REVISION_FAILURE_RATE, SECTION_CHARS_PER_CLAIM, type SectionCost, SUMMARY_OUTPUT_TOKENS, VERDICT_OUTPUT_TOKENS } from "./estimate.ts";
+import { attachRequest as attachCost, driftSearch, expectedProseChars, type ExpectedRequests, expectedVerification, expectedWrite, sectionCost, type SectionCost, summaryRequest, uncitedVerdict, unwrittenVerdict, verdicts } from "./estimate.ts";
 import { type Evidence, inFile, isRepoEvidence } from "./evidence.ts";
 import { ASSUMED_SUMMARY, finishFit, type FitPlan, type FittedPrompt, keepCodeRank, parseSummary, planFit, summaryRequests, wholeFit } from "./fit.ts";
 import { GETTING_STARTED, unmatchedCommands } from "./getting-started.ts";
@@ -16,7 +16,7 @@ import { type Discussions, NO_DISCUSSIONS } from "./github.ts";
 import { contentHash } from "./hash.ts";
 import { ATTACH_SCHEMA, ATTACH_SYSTEM, attachPrompt, humanClaims, parseAttachments } from "./human-claims.ts";
 import { decisionRecords, KEY_DECISIONS, KEY_DECISIONS_SYSTEM, VERIFY_DECISIONS_SYSTEM } from "./key-decisions.ts";
-import { completeCached, estimateCost, inputTokens, isCached, type Llm, type LlmRequest, priceTokens, readCached, type RequestCost } from "./llm.ts";
+import { completeCached, isCached, type Llm, type LlmRequest, readCached } from "./llm.ts";
 import { type DriftRecord, type DriftReport, saveManifest } from "./manifest.ts";
 import type { Module } from "./modules.ts";
 import { BOTTOM_UP, bottomUpPrompt, type Claim, CONVENTIONS_SYSTEM, type EvidenceName, GETTING_STARTED_SYSTEM, parseSection, parseVerdict, PIECES, renderModuleEvidence, renderRepo, renderSetup, repairPrompt, revisionPrompt, SECTION_DISCUSSION, SECTION_SYSTEM, sectionPrompt, type SectionResponse, SUMMARISED_NOTE, VERDICT_SCHEMA, VERIFY_CONVENTIONS_SYSTEM, VERIFY_DISCUSSION, VERIFY_DOCS, VERIFY_REPO_SYSTEM, VERIFY_SETUP_SYSTEM, VERIFY_SYSTEM, verifyPrompt, writeRequest } from "./prompts.ts";
@@ -159,18 +159,19 @@ export function sectionWriter(
     return target.modules.map((module) => {
       const text = written.get(module);
       if (text !== undefined) return { module, text };
-      if (!unwritten.has(module)) {
+      if (!placeholderTexts.has(module)) {
         const section = sectionIds.get(module)!;
         const about = subject(section);
         const { fitted, request } = plannedWrite(section, about, undefined, undefined);
-        const claims = about.worthAsking(fitted.sent) ? expectedClaims(inputTokens(request)) : 0;
-        unwritten.set(module, `# ${about.title}\n\n${"x".repeat(Math.round(claims * SECTION_CHARS_PER_CLAIM))}\n`);
+        const chars = about.worthAsking(fitted.sent) ? expectedProseChars(request) : 0;
+        // Text, not just its length: Overview's and Architecture's prompts are fitted to the prompt limit around it.
+        placeholderTexts.set(module, `# ${about.title}\n\n${"x".repeat(chars)}\n`);
       }
-      return { module, text: unwritten.get(module)! };
+      return { module, text: placeholderTexts.get(module)! };
     });
   }
   /** The text `expectedModuleSections` assumes for each Module Section not yet written, worked out once. */
-  const unwritten = new Map<Module, string>();
+  const placeholderTexts = new Map<Module, string>();
 
   function bottomUpSubject(section: string, expected: boolean): SubjectSpec {
     const { title, system, evidence: ids } = BOTTOM_UP[section]!;
@@ -315,11 +316,22 @@ export function sectionWriter(
     const sided = found.filter(({ docs, code }) =>
       docs.length > 0 && code.length > 0 && docs.every((id) => evidenceIs(id, isDoc)) && code.every((id) => evidenceIs(id, isCode)));
     const claims = sided.map(({ description, docs, code }) => ({ text: description, evidence: [...docs, ...code] }));
-    const failures = await verifySection(llm, models.verify, repoDir, { paragraphs: [{ claims }] }, { ...about, verifySystem: () => VERIFY_DRIFT_SYSTEM });
+    const failures = await verifySection(llm, models.verify, repoDir, { paragraphs: [{ claims }] }, driftVerifier(about));
 
     const record = (ids: string[]) => [...new Set(ids)].map((id) => ({ id, hash: evidence.get(id)!.hash }));
     return sided.flatMap(({ description, docs, code }, i) =>
       failures.has(claims[i]!) ? [] : [{ description, docs: record(docs), code: record(code) }]);
+  }
+
+  /**
+   * The Drift search of `section` for an estimate, with the verdicts on the
+   * Drift it may find; nothing once it is cached, or for a Module no doc concerns.
+   */
+  function expectedDrift(section: string, about: Subject): ExpectedRequests[] {
+    const search = driftRequest(section)?.request;
+    if (!search || isCached(repoDir, search)) return [];
+    const verdict = verdictFor(models.verify, { text: "", evidence: [] }, [], driftVerifier(about));
+    return driftSearch(search, unwrittenVerdict(verdict, [...about.evidence.values()].map(about.render)));
   }
 
   /**
@@ -364,18 +376,6 @@ export function sectionWriter(
       ? summaryCalls.map(() => ASSUMED_SUMMARY)
       : summaryCalls.map((request) => parseSummary(readCached(repoDir, request)!)));
     return { fitted, uncachedSummaries, request: writeRequestFor(about, fitted, fitted.prompt) };
-  }
-
-  /**
-   * The share of a Section's Claims a write is expected to verify anew, and the
-   * share of those expected to fail: all of them at the first write's rate,
-   * unless it revises `existing`, whose Claims citing only unchanged Evidence
-   * keep their cached verdicts, and whose new Claims fail more rarely.
-   */
-  function expectedVerification(section: string, sent: Evidence[], existing: string | undefined, changedEvidence: string[] | undefined) {
-    if (!changedEvidence || existing === undefined || !manifest.sections[section]) return { share: 1, failureRate: CLAIM_FAILURE_RATE };
-    const changed = new Set(changedEvidence);
-    return { share: sent.filter((e) => changed.has(e.id)).length / Math.max(sent.length, 1), failureRate: REVISION_FAILURE_RATE };
   }
 
   function writeRequestFor(about: Subject, fitted: FittedPrompt, prompt: string): LlmRequest {
@@ -509,72 +509,48 @@ export function sectionWriter(
       if (uncachedSummaries.length === 0 && (!written || (!moduleSectionsChange && isCached(repoDir, request)))) {
         return sectionCost(section, [], 0);
       }
-      const drift = written ? driftRequest(section)?.request : undefined;
-      const costs: Expected[] = [
-        ...uncachedSummaries.map((summary) => once("summary", estimateCost(summary, SUMMARY_OUTPUT_TOKENS))),
+      const expected: ExpectedRequests[] = [
+        ...uncachedSummaries.map(summaryRequest),
         // Only a written Section is searched for Drift; a Proposal never is, so this overstates a Proposal's cost.
-        ...(drift && !isCached(repoDir, drift) ? [once("drift", estimateCost(drift, DRIFT_OUTPUT_TOKENS))] : []),
+        ...(written ? expectedDrift(section, about) : []),
       ];
-      if (!written) return sectionCost(section, costs, 0);
+      if (!written) return sectionCost(section, expected, 0);
 
-      const input = inputTokens(request);
-      const claims = expectedClaims(input);
-      const output = claims * OUTPUT_TOKENS_PER_CLAIM;
-      // A revision keeps the Claims its changed Evidence doesn't touch, whose verdicts are cached; only the rest are verified anew.
-      const { share, failureRate } = expectedVerification(section, fitted.sent, existing, changedEvidence);
-      const verified = claims * share;
-      const failing = verified * failureRate;
-      // The Section's one repair, sent when any Claim fails: its prompt carries the first prompt, the first answer and why each Claim failed.
-      const repair = 1 - (1 - failureRate) ** verified;
-      const repairInput = input + output + (repair > 0 ? (failing / repair) * FAILURE_TOKENS : 0);
-      // Each verdict carries a Claim and the Evidence it cites, about `CITED_PER_CLAIM` pieces of average size.
-      const rendered = fitted.sent.map(about.render);
-      const cited = rendered.join("").length / Math.max(rendered.length, 1) * Math.min(CITED_PER_CLAIM, rendered.length);
-      const verdict = estimateCost({
-        kind: "verdict",
-        model: models.verify,
-        system: about.verifySystem([]),
-        prompt: verifyPrompt({ text: "x".repeat(SECTION_CHARS_PER_CLAIM), evidence: [] }, [], about.render) + "x".repeat(Math.round(cited)),
-        schema: VERDICT_SCHEMA,
-      }, VERDICT_OUTPUT_TOKENS);
-      costs.push(
-        once("write", priceTokens(request.model, input, output)),
-        { kind: "write", times: repair, cost: priceTokens(request.model, repairInput, output) },
-        // The first verification's verdicts, then those of the Claims the repair rewrote.
-        { kind: "verdict", times: verified + failing, cost: verdict },
-      );
-      return sectionCost(section, costs, claims);
+      const revises = existing !== undefined && manifest.sections[section] !== undefined;
+      const verification = expectedVerification(fitted.sent, revises ? changedEvidence : undefined);
+      const verdict = unwrittenVerdict(verdictFor(models.verify, { text: "", evidence: [] }, [], about), fitted.sent.map(about.render));
+      const { claims, requests } = expectedWrite(request, verification, verdict);
+      return sectionCost(section, [...expected, ...requests], claims);
     },
 
     estimateAdopt(section, content) {
       const about = subject(section);
       const { texts } = adoptedClaims(about, content);
-      const costs: Expected[] = [];
+      const expected: ExpectedRequests[] = [];
       let claims: Claim[] | undefined = texts.map((text) => ({ text, evidence: [] }));
       if (texts.length > 0 && about.evidence.size > 0) {
         const { request } = attachRequest(about, texts);
         const cached = readCached(repoDir, request);
         if (cached === undefined) {
-          costs.push(once("attach", estimateCost(request, ATTACH_OUTPUT_TOKENS)));
+          expected.push(attachCost(request));
           claims = undefined;
         } else {
           const attached = parseAttachments(cached, texts.length);
           claims = texts.map((text, i) => ({ text, evidence: attached[i]! }));
         }
       }
-      const verdicts = claims
-        ? claims.flatMap((claim) => {
+      if (claims) {
+        expected.push(...verdicts(claims.flatMap((claim) => {
           const verdict = verdictRequest(models.verify, claim, about);
           return "request" in verdict && !isCached(repoDir, verdict.request) ? [verdict.request] : [];
-        })
-        // Which Evidence each Claim cites is unknown until it is found, so its verdict is estimated without any.
-        : texts.map((text): LlmRequest => ({
-          kind: "verdict", model: models.verify, system: about.verifySystem([]), prompt: verifyPrompt({ text, evidence: [] }, [], about.render), schema: VERDICT_SCHEMA,
-        }));
-      costs.push(...verdicts.map((request) => once("verdict", estimateCost(request, VERDICT_OUTPUT_TOKENS))));
-      const drift = driftRequest(section)?.request;
-      if (drift && !isCached(repoDir, drift)) costs.push(once("drift", estimateCost(drift, DRIFT_OUTPUT_TOKENS)));
-      return sectionCost(section, costs, texts.length);
+        })));
+      } else {
+        // Which Evidence each Claim cites is unknown until it is found, so each verdict is expected to carry as much as a written Claim's.
+        const rendered = [...about.evidence.values()].map(about.render);
+        expected.push(...texts.map((text) => uncitedVerdict(verdictFor(models.verify, { text, evidence: [] }, [], about), rendered)));
+      }
+      expected.push(...expectedDrift(section, about));
+      return sectionCost(section, expected, texts.length);
     },
 
     async write(section, existing, changedEvidence) {
@@ -639,44 +615,23 @@ export function sectionWriter(
   };
 }
 
-/** A request of `kind` expected `times` over, a fraction when it may not be sent at all, at `cost` each. */
-interface Expected {
-  kind: LlmRequest["kind"];
-  times: number;
-  cost: RequestCost;
-}
-
-function once(kind: LlmRequest["kind"], cost: RequestCost): Expected {
-  return { kind, times: 1, cost };
-}
-
-/** A cost estimate of one Section, from the requests it is expected to send and the Claims it is expected to make. */
-function sectionCost(section: string, costs: Expected[], claims: number): SectionCost {
-  const requests: RequestCounts = {};
-  let tokens = 0;
-  let dollars = 0;
-  const unpriced = new Set<string>();
-  for (const { kind, times, cost } of costs) {
-    if (times <= 0) continue;
-    requests[kind] = (requests[kind] ?? 0) + times;
-    tokens += cost.tokens * times;
-    if (cost.dollars === undefined) unpriced.add(cost.model);
-    else dollars += cost.dollars * times;
-  }
-  return { section, tokens: Math.round(tokens), dollars, unpriced: [...unpriced], requests, claims };
-}
-
 /** The verifier's request for a Claim, or why it fails before any model sees it. */
-function verdictRequest(
-  model: string,
-  claim: Claim,
-  { evidence, check, verifySystem, render, uncited }: Subject,
-): { request: LlmRequest } | { failed: string } {
-  const failed = check?.(claim);
+function verdictRequest(model: string, claim: Claim, about: Subject): { request: LlmRequest } | { failed: string } {
+  const failed = about.check?.(claim);
   if (failed !== undefined) return { failed };
-  const cited = [...new Set(claim.evidence)].flatMap((id) => evidence.get(id) ?? []);
-  if (cited.length === 0) return { failed: uncited };
-  return { request: { kind: "verdict", model, system: verifySystem(cited), prompt: verifyPrompt(claim, cited, render), schema: VERDICT_SCHEMA } };
+  const cited = [...new Set(claim.evidence)].flatMap((id) => about.evidence.get(id) ?? []);
+  if (cited.length === 0) return { failed: about.uncited };
+  return { request: verdictFor(model, claim, cited, about) };
+}
+
+/** A Subject whose Claims are Drift, verified against both the docs and the code they cite. */
+function driftVerifier(about: Subject): Subject {
+  return { ...about, verifySystem: () => VERIFY_DRIFT_SYSTEM };
+}
+
+/** The verifier's request for a Claim against `cited`; an estimate builds one before it knows the Claim or its Evidence. */
+function verdictFor(model: string, claim: Claim, cited: Evidence[], { verifySystem, render }: Subject): LlmRequest {
+  return { kind: "verdict", model, system: verifySystem(cited), prompt: verifyPrompt(claim, cited, render), schema: VERDICT_SCHEMA };
 }
 
 /** Why each Claim failed verification; a Claim not listed is confirmed by its cited Evidence. */

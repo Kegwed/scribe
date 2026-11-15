@@ -105,7 +105,7 @@ The excerpt describes [hono](https://github.com/honojs/hono), copyright (c) 2021
 
 - **TypeScript and JavaScript only.** Scribe reads code through the TypeScript compiler, so it supports TypeScript and JavaScript Target repos and no other languages.
 - **Claude only.** Scribe calls Claude directly and has no layer for other LLM providers ([ADR-0003](docs/adr/0003-claude-only-no-provider-abstraction.md)).
-- **GitHub Evidence never makes a Section Stale.** A cited pull request, comment or issue is not re-fetched, so an edited or deleted comment can leave a Claim citing outdated text until something else makes the Section Stale or you run `scribe reset` ([ADR-0007](docs/adr/0007-github-evidence-never-makes-a-section-stale.md)).
+- **GitHub Evidence never makes a Section Stale.** A cited pull request, comment or issue is not re-fetched, so an edited or deleted comment can leave a Claim citing Evidence that no longer matches GitHub until something else makes the Section Stale or you run `scribe reset` ([ADR-0007](docs/adr/0007-github-evidence-never-makes-a-section-stale.md)).
 - Scribe is at 0.x: its commands and files may still change before 1.0.
 
 ## Further reading
