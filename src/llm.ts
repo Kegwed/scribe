@@ -41,6 +41,8 @@ export function estimateCost(request: LlmRequest, outputTokens: number): Request
 export interface RequestCost {
   model: string;
   tokens: number;
+  /** Of `tokens`, those the request sends. */
+  input: number;
   /** Undefined for a model whose price isn't known. */
   dollars: number | undefined;
 }
@@ -53,7 +55,7 @@ export function inputTokens(request: LlmRequest, extraChars = 0): number {
 /** What `input` tokens sent to `model` and `output` tokens back cost. */
 export function priceTokens(model: string, input: number, output: number): RequestCost {
   const price = PRICES[model];
-  return { model, tokens: input + output, dollars: price && (input * price.input + output * price.output) / 1_000_000 };
+  return { model, tokens: input + output, input, dollars: price && (input * price.input + output * price.output) / 1_000_000 };
 }
 
 /**
@@ -102,13 +104,63 @@ export interface ClaudeAnswer {
   id: string;
 }
 
+/*
+ * The most output tokens each kind of request may return. Sized from the #28
+ * measurement on honojs/hono (a `generate` of 687 responses and the `update`
+ * after it) and the failed #31 `generate` (305 responses), whose usage logs
+ * give each response's model and output tokens. Sonnet answers only writes;
+ * Haiku's kind follows from where it falls in a Section's requests: summaries
+ * first, verdicts after each write, then the Drift search, which carries a
+ * Module's whole code and docs. Each limit is about three times the largest
+ * measured response of its kind or more, so a normal response is never cut
+ * off, and far above the output the cost estimate assumes of it. Before this,
+ * every request was sent with 64,000, and one runaway summary of 64,000 tokens
+ * stopped the #31 run.
+ */
+export const OUTPUT_LIMITS: Readonly<Record<LlmRequest["kind"], number>> = {
+  /**
+   * Measured: at most 933 tokens in the 610 responses sent before any write,
+   * all summaries, but for the one runaway; the estimate assumes 200.
+   */
+  summary: 4_000,
+  /** Measured: at most 1,372 tokens in any Haiku response but a Drift search; the estimate assumes 450. */
+  verdict: 4_000,
+  /** Measured: at most 9,125 tokens, for a Module of about 173,000 prompt tokens; the estimate assumes 500. */
+  drift: 32_000,
+  /**
+   * Assumed: no adopt was measured. It names the Evidence of every Claim in a
+   * human's Section, as a write cites it, so it gets a write's limit.
+   */
+  attach: 32_000,
+  /** Measured: at most 11,208 tokens, of 31 writes and repairs; the estimate assumes about 150 a Claim, 6,750 for the largest prompt. */
+  write: 32_000,
+};
+
+/** A response stopped at its output limit twice, so the request has no answer. */
+export class CutOff extends Error {
+  readonly kind: LlmRequest["kind"];
+  constructor(kind: LlmRequest["kind"], model: string) {
+    super(`a ${kind} from ${model} was cut off at its ${OUTPUT_LIMITS[kind].toLocaleString("en-US")}-token output limit twice`);
+    this.kind = kind;
+  }
+}
+
 export function claudeLlm(): Llm & { answer(request: LlmRequest): Promise<ClaudeAnswer> } {
   const client = new Anthropic();
-  const answer = async ({ model, system, prompt, schema }: LlmRequest): Promise<ClaudeAnswer> => {
+  const answer = async (request: LlmRequest): Promise<ClaudeAnswer> => {
+    // One response running to its limit is retried once; the #31 run's runaway summary was 1 of 1,035 responses measured.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const answered = await ask(request);
+      if (answered) return answered;
+    }
+    throw new CutOff(request.kind, request.model);
+  };
+  /** Claude's answer, or undefined if it was cut off at the request's output limit. */
+  const ask = async ({ kind, model, system, prompt, schema }: LlmRequest): Promise<ClaudeAnswer | undefined> => {
     const message = await client.beta.messages
       .stream({
         model,
-        max_tokens: 64000,
+        max_tokens: OUTPUT_LIMITS[kind],
         // Refusals on Sonnet re-run server-side; Haiku has no server-side fallback.
         ...(model === MODELS.write
           ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
@@ -118,6 +170,7 @@ export function claudeLlm(): Llm & { answer(request: LlmRequest): Promise<Claude
         output_config: { format: { type: "json_schema", schema } },
       })
       .finalMessage();
+    if (message.stop_reason === "max_tokens") return undefined;
     if (message.stop_reason !== "end_turn") {
       throw new Error(`${model} stopped early: ${message.stop_reason}`);
     }
