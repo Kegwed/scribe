@@ -77,10 +77,10 @@ These figures come from one run each on [honojs/hono](https://github.com/honojs/
 
 | Run | Estimate shown | Actually spent |
 | --- | --- | --- |
-| first `generate` | $0.71, about 844,799 tokens | $2.34, 2,286,385 tokens |
-| `update` after one release | $0.35, about 469,038 tokens | $0.61, 745,233 tokens |
+| first `generate` | $2.39, about 2,249,182 tokens | $2.30, 2,328,979 tokens |
+| `update` after one release | $0.68, about 630,560 tokens | $1.28, 1,319,435 tokens |
 
-"Actually spent" is the token usage Claude reported for every request, priced at Anthropic's published rates. **The estimate currently runs low**: it was about a third of the real cost for this `generate`, and about 60% of it for this `update`. Budget for a first `generate` to cost about three times its estimate.
+"Actually spent" is the token usage Claude reported for every request, priced at Anthropic's published rates. The estimate counts every kind of request a run makes: Section writes and their repairs, verdicts, summaries and Drift searches. For this `generate` it was within 4% of the real cost. **For an `update` it can run low**: it was about half the real cost here, because each rewritten Section was checked again in full and then repaired, and the estimate expects that for few of them. Budget for an `update` to cost about twice its estimate.
 
 ## Example
 
