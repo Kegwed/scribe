@@ -16,7 +16,7 @@ import { type Discussions, NO_DISCUSSIONS } from "./github.ts";
 import { contentHash } from "./hash.ts";
 import { ATTACH_SCHEMA, ATTACH_SYSTEM, attachPrompt, humanClaims, parseAttachments } from "./human-claims.ts";
 import { decisionRecords, KEY_DECISIONS, KEY_DECISIONS_SYSTEM, VERIFY_DECISIONS_SYSTEM } from "./key-decisions.ts";
-import { completeCached, isCached, type Llm, type LlmRequest, readCached } from "./llm.ts";
+import { completeCached, CutOff, isCached, type Llm, type LlmRequest, readCached } from "./llm.ts";
 import { type DriftRecord, type DriftReport, saveManifest } from "./manifest.ts";
 import type { Module } from "./modules.ts";
 import { BOTTOM_UP, bottomUpPrompt, type Claim, CONVENTIONS_SYSTEM, type EvidenceName, GETTING_STARTED_SYSTEM, parseSection, parseVerdict, PIECES, renderModuleEvidence, renderRepo, renderSetup, repairPrompt, revisionPrompt, SECTION_DISCUSSION, SECTION_SYSTEM, sectionPrompt, type SectionResponse, SUMMARISED_NOTE, VERDICT_SCHEMA, VERIFY_CONVENTIONS_SYSTEM, VERIFY_DISCUSSION, VERIFY_DOCS, VERIFY_REPO_SYSTEM, VERIFY_SETUP_SYSTEM, VERIFY_SYSTEM, verifyPrompt, writeRequest } from "./prompts.ts";
@@ -500,7 +500,7 @@ export function sectionWriter(
     return true;
   }
 
-  return {
+  const writer: SectionWriter = {
     estimate(section, existing, changedEvidence, moduleSectionsChange = false) {
       const about = subject(section, true);
       const { fitted, uncachedSummaries, request } = plannedWrite(section, about, existing, changedEvidence);
@@ -613,6 +613,23 @@ export function sectionWriter(
       return unsupported;
     },
   };
+  // A cut-off response throws before its Section's file or record is written, so the run fails with nothing of it partial.
+  return {
+    ...writer,
+    write: (section, ...rest) => naming(section, "writing", () => writer.write(section, ...rest)),
+    propose: (section) => naming(section, "writing a Proposal for", () => writer.propose(section)),
+    adopt: (section, content) => naming(section, "adopting", () => writer.adopt(section, content)),
+  };
+}
+
+/** Runs `work` on `section`, a response to it cut off twice failing with what was `doing` to which Section. */
+async function naming<T>(section: string, doing: string, work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof CutOff) throw new Error(`${error.message}, ${doing} Section ${section}`, { cause: error });
+    throw error;
+  }
 }
 
 /** The verifier's request for a Claim, or why it fails before any model sees it. */

@@ -1,11 +1,11 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { adopt } from "./commands/adopt.ts";
 import { generate } from "./commands/generate.ts";
-import { fakeClaude } from "./test/fake-claude.ts";
+import { CUT_OFF, fakeClaude } from "./test/fake-claude.ts";
 import { createFixtureRepo } from "./test/fixture-repo.ts";
 import { scriptedLlm } from "./test/recorded-llm.ts";
 
@@ -489,6 +489,49 @@ describe("scribe adopt and scribe reset", () => {
       const { status, stderr } = scribe(repo.dir, command);
       expect(stderr).toMatch(new RegExp(`Usage: scribe ${command} <section>`));
       expect(status).toBe(1);
+    }
+  });
+});
+
+describe("a response cut off at its output limit", () => {
+  function target() {
+    return createFixtureRepo({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }] }),
+      "src/a/a.ts": "export const a = 1;\n",
+    });
+  }
+  const isWrite = (schema: unknown) => JSON.stringify(schema).includes("paragraphs");
+  const written = { paragraphs: [{ claims: [{ text: "A is one.", evidence: ["src/a/a.ts#a"] }] }] };
+  const confirmed = { confirmed: true, reason: "a is 1" };
+
+  it("is asked again once, and the run goes on when the retry ends normally", async () => {
+    const repo = target();
+    let writes = 0;
+    const claude = await fakeClaude(({ schema }) => (isWrite(schema) ? (writes++ === 0 ? CUT_OFF : written) : confirmed));
+    try {
+      const { status, stderr } = await scribeAgainst(claude.url, repo.dir, "generate", "--yes");
+
+      expect(stderr).not.toMatch(/^scribe: /m);
+      expect(status).toBe(0);
+      expect(readFileSync(join(repo.dir, "docs/guide/modules/src-a.md"), "utf8")).toContain("A is one.");
+    } finally {
+      await claude.close();
+    }
+  });
+
+  it("cut off again, fails the run naming the request kind and the Section, and writes nothing of that Section", async () => {
+    const repo = target();
+    const claude = await fakeClaude(({ schema }) => (isWrite(schema) ? CUT_OFF : confirmed));
+    try {
+      const { status, stderr } = await scribeAgainst(claude.url, repo.dir, "generate", "--yes");
+
+      expect(stderr).toMatch(/^scribe: a write from claude-sonnet-5-5 was cut off at its 32,000-token output limit twice, writing Section modules\/src-a$/m);
+      expect(status).toBe(1);
+      expect(existsSync(join(repo.dir, "docs/guide/modules/src-a.md"))).toBe(false);
+      const manifest = join(repo.dir, ".scribe/manifest.json");
+      expect(existsSync(manifest) ? JSON.parse(readFileSync(manifest, "utf8")).sections["modules/src-a"] : undefined).toBeUndefined();
+    } finally {
+      await claude.close();
     }
   });
 });

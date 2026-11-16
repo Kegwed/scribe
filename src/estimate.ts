@@ -1,5 +1,5 @@
 import type { Evidence } from "./evidence.ts";
-import { estimateCost, inputTokens, type LlmRequest, priceTokens, type RequestCost } from "./llm.ts";
+import { estimateCost, inputTokens, type LlmRequest, OUTPUT_LIMITS, priceTokens, type RequestCost } from "./llm.ts";
 import { BOTTOM_UP } from "./prompts.ts";
 
 /** What estimates one Section's cost, as a SectionWriter does. */
@@ -71,10 +71,12 @@ export function sectionCost(section: string, expected: ExpectedRequests[], claim
   let tokens = 0;
   let dollars = 0;
   const unpriced = new Set<string>();
-  for (const { count, cost } of sent) {
-    tokens += cost.tokens * count;
+  for (const { kind, count, cost } of sent) {
+    // A response cut off at its limit costs its input and the limit's output, and the retry costs what the request does.
+    const cutOff = priceTokens(cost.model, cost.input, OUTPUT_LIMITS[kind]);
+    tokens += (cost.tokens + cutOff.tokens * CUT_OFF_RATE) * count;
     if (cost.dollars === undefined) unpriced.add(cost.model);
-    else dollars += cost.dollars * count;
+    else dollars += (cost.dollars + cutOff.dollars! * CUT_OFF_RATE) * count;
   }
   const requests = countByKind(sent.map(({ kind, count }) => [kind, count]));
   return { section, tokens: Math.round(tokens), dollars, unpriced: [...unpriced], requests, claims };
@@ -269,5 +271,11 @@ const ATTACH_OUTPUT_TOKENS = 500;
  * are short: 8 of hono's 10 Drift searches found no Drift.
  */
 const DRIFT_OUTPUT_TOKENS = 500;
+/**
+ * The share of responses cut off at their output limit, each retried once.
+ * Measured: 1 of 1,035 on hono, the #28 `generate` and `update` and the failed
+ * #31 `generate`, whose runaway summary ran to 64,000 tokens.
+ */
+const CUT_OFF_RATE = 0.001;
 /** Drift a search is expected to find, each verified by a verdict of its own. Measured: hono's 10 Drift searches found 4. */
 const DRIFT_PER_SEARCH = 0.4;
