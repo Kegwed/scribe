@@ -1,6 +1,6 @@
 {
   "name": "@kegwed/scribe",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Generates evidence-grounded onboarding docs for a repository and keeps them current.",
   "keywords": [
     "documentation",
