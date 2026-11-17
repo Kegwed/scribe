@@ -39,7 +39,7 @@ export async function adopt(
   const { discussions, saveCache } = await sectionDiscussions(repoDir, section, module, github, report.warnings);
   const writer = sectionWriter(repoDir, target, llm, report, discussions);
   const estimate: CostEstimate = totalCost([writer.estimateAdopt(section, content)]);
-  if (!(await confirmed(estimate, confirm))) return { unsupportedClaims: [], warnings: report.warnings, estimate, declined: true };
+  if (!(await confirmed(estimate, confirm, report.warnings))) return { unsupportedClaims: [], warnings: report.warnings, estimate, declined: true };
 
   await gitIgnore(repoDir, CACHE_DIR);
   await saveCache();

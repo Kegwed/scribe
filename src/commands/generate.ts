@@ -46,7 +46,7 @@ export async function generate(
   }
 
   const estimate = estimateRun(writer, planned);
-  if (!(await confirmed(estimate, confirm))) return { ...report, estimate, declined: true };
+  if (!(await confirmed(estimate, confirm, report.warnings))) return { ...report, estimate, declined: true };
 
   await gitIgnore(repoDir, CACHE_DIR);
   await saveCache();

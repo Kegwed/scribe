@@ -35,7 +35,7 @@ export async function reset(
   const record = target.manifest.sections[section];
   const previous = record?.adopted || record?.unsupportedClaims ? undefined : existing;
   const estimate = estimateRun(writer, [{ section, existing: previous }]);
-  if (!(await confirmed(estimate, confirm))) return { ...report, estimate, declined: true };
+  if (!(await confirmed(estimate, confirm, report.warnings))) return { ...report, estimate, declined: true };
 
   await gitIgnore(repoDir, CACHE_DIR);
   await saveCache();

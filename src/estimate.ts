@@ -89,8 +89,12 @@ function countByKind(counts: [LlmRequest["kind"], number][]): RequestCounts {
   return requests;
 }
 
-/** Asked with a run's estimate before any LLM call; the run goes ahead only on true. */
-export type Confirm = (estimate: CostEstimate) => Promise<boolean>;
+/**
+ * Asked with a run's estimate before any LLM call, and the warnings the run
+ * has raised so far, such as GitHub being skipped, which the estimate already
+ * reflects; the run goes ahead only on true.
+ */
+export type Confirm = (estimate: CostEstimate, warnings: string[]) => Promise<boolean>;
 
 /** Options of a run that writes the Guide, such as `generate` or `update`. */
 export interface RunOptions {
@@ -102,8 +106,8 @@ export interface RunOptions {
 }
 
 /** Whether a run may go ahead: one that costs nothing always may, and so may one nobody is asked about. */
-export async function confirmed(estimate: CostEstimate, confirm: Confirm | undefined): Promise<boolean> {
-  return estimate.tokens === 0 || !confirm || (await confirm(estimate));
+export async function confirmed(estimate: CostEstimate, confirm: Confirm | undefined, warnings: string[]): Promise<boolean> {
+  return estimate.tokens === 0 || !confirm || (await confirm(estimate, [...warnings]));
 }
 
 /**

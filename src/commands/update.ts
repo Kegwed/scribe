@@ -62,7 +62,7 @@ export async function update(
 
   const estimate = estimateRun(writer, planned.map((p) =>
     p.kind === "write" ? { section: p.section, existing: p.existing, changed: p.changed } : { section: p.section, existing: undefined }));
-  if (!(await confirmed(estimate, confirm))) return { ...report, removed: [], proposals: [], estimate, declined: true };
+  if (!(await confirmed(estimate, confirm, report.warnings))) return { ...report, removed: [], proposals: [], estimate, declined: true };
 
   await gitIgnore(repoDir, CACHE_DIR);
   await saveCache();
