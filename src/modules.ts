@@ -10,7 +10,15 @@ export interface Module {
   path: string;
 }
 
-const CODE_FILE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
+/**
+ * A Module path as Claude reads it, in Evidence text and prompts: a bare "."
+ * reads as relative to whatever path sits beside it, so the root is named.
+ */
+export function renderedPath(path: string): string {
+  return path === "." ? "the repo root" : path;
+}
+
+const CODE_FILE =/\.(?:[cm]?[jt]s|[jt]sx)$/;
 /** Tests, examples, fixtures and tooling: Evidence, never Modules. */
 const NON_PRODUCT_DIRS = new Set([
   "test", "tests", "__tests__", "spec", "e2e", "__mocks__", "mocks",

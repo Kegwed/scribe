@@ -507,6 +507,31 @@ describe("generate", () => {
       expect(result.droppedClaims).toEqual([{ section: "architecture", text: "A depends on B.", reason: "B imports A" }]);
     });
 
+    it("names a root Module's path as the repo root, so Claude can't read it as a relative path", async () => {
+      const repo = createFixtureRepo({
+        "scribe.config.json": JSON.stringify({ guideDir: "docs/guide" }),
+        "package.json": JSON.stringify({ name: "app" }),
+        "pnpm-workspace.yaml": "packages:\n  - '.'\n  - 'adapters/*'\n",
+        "src/index.ts": "export const root = 1;\n",
+        "adapters/aws/package.json": JSON.stringify({ name: "aws" }),
+        "adapters/aws/index.ts": 'import { root } from "../../src/index.ts";\n\nexport const aws = root + 1;\n',
+      });
+      const llm = scriptedLlm([
+        { paragraphs: [{ claims: [{ text: "Root is one.", evidence: ["src/index.ts#root"] }] }] },
+        { paragraphs: [{ claims: [{ text: "AWS adds one.", evidence: ["adapters/aws/index.ts#aws"] }] }] },
+      ], {}, { topLevel: TOP_LEVEL });
+
+      await generate(repo.dir, {}, { llm });
+
+      const overview = topLevelWrites(llm, "Overview")[0]!.prompt;
+      expect(overview).toContain("app (the repo root)\naws (adapters/aws)");
+      expect(overview).toContain('<module-section module="app" path="the repo root">');
+      expect(topLevelWrites(llm, "Architecture")[0]!.prompt).toContain("adapters/aws imports the repo root");
+      expect(writes(llm).map((call) => call.prompt.split("\n")[0])).toEqual(["Module: app (the repo root)", "Module: aws (adapters/aws)"]);
+      const { sections } = JSON.parse(read(repo.dir, ".scribe/manifest.json"));
+      expect(Object.keys(sections)).toContain("modules/root");
+    });
+
     it("cites a SHA-pinned permalink to the root package.json when origin is on GitHub", async () => {
       const repo = createFixtureRepo(LAYERED);
       repo.git("remote", "add", "origin", "git@github.com:acme/app.git");

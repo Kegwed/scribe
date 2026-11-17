@@ -2,7 +2,7 @@ import { isCode } from "./analyser.ts";
 import { isDoc } from "./docs.ts";
 import { type Evidence, inFile, isRepoEvidence } from "./evidence.ts";
 import type { LlmRequest } from "./llm.ts";
-import type { Module } from "./modules.ts";
+import { type Module, renderedPath } from "./modules.ts";
 import { ARCHITECTURE, OVERVIEW } from "./target.ts";
 
 export interface Claim {
@@ -105,7 +105,7 @@ export function renderRepo(e: Evidence): string {
 export function bottomUpPrompt(title: string, moduleSections: { module: Module; text: string }[], rendered: string[]): string {
   return [
     `Section: ${title}`,
-    ...moduleSections.map(({ module, text }) => `<module-section module="${module.name}" path="${module.path}">\n${text}</module-section>`),
+    ...moduleSections.map(({ module, text }) => `<module-section module="${module.name}" path="${renderedPath(module.path)}">\n${text}</module-section>`),
     ...rendered,
   ].join("\n\n");
 }
@@ -136,7 +136,7 @@ const DOC_TAG = `<doc id="`;
 /** Only a prompt carrying docs explains them, so Sections of Modules no doc mentions are asked for as before. */
 export function sectionPrompt(module: Module, rendered: string[]): string {
   const hasDocs = rendered.some((r) => r.startsWith(DOC_TAG));
-  return [`Module: ${module.name} (${module.path})`, ...rendered, ...(hasDocs ? [DOCS_NOTE] : [])].join("\n\n");
+  return [`Module: ${module.name} (${renderedPath(module.path)})`, ...rendered, ...(hasDocs ? [DOCS_NOTE] : [])].join("\n\n");
 }
 
 const DOCS_NOTE = `The <doc> items are passages of the repository's existing docs. A Claim may cite them in "evidence" by id, like symbols. Where a doc contradicts the code, the code is right: describe what the code does, never what the doc says instead.`;
