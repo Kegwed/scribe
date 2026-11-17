@@ -507,7 +507,7 @@ export function sectionWriter(
       // A Section with no Evidence is written without the LLM; a cached first write means a re-run of work already paid for.
       const written = about.worthAsking(fitted.sent);
       if (uncachedSummaries.length === 0 && (!written || (!moduleSectionsChange && isCached(repoDir, request)))) {
-        return sectionCost(section, [], 0);
+        return { ...sectionCost(section, [], 0), free: written ? "cached" : "no-evidence" };
       }
       const expected: ExpectedRequests[] = [
         ...uncachedSummaries.map(summaryRequest),

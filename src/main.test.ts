@@ -112,3 +112,24 @@ describe("warnings raised before the cost estimate", () => {
     expect(status).toBe(0);
   });
 });
+
+describe("the cost estimate's Sections at no cost", () => {
+  beforeEach(() => vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-dummy"));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("lists cached Sections first, then names those with no Evidence", async () => {
+    const repo = target();
+    await scribe(repo.dir, ["generate", "--yes"]);
+    repo.commit({
+      "scribe.config.json": JSON.stringify({ modules: [{ name: "A", path: "src/a" }, { name: "B", path: "src/b" }] }),
+      "src/b/b.ts": "export const b = 1;\n",
+    });
+
+    const { lines } = await scribe(repo.dir, ["generate"], { answer: "n" });
+
+    expect(lines.filter((line) => line.startsWith("  plus"))).toEqual([
+      "  plus 1 cached Section at no cost",
+      "  plus 3 Sections with no Evidence, written without Claude: getting-started, conventions, key-decisions",
+    ]);
+  });
+});

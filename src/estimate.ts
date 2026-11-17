@@ -41,6 +41,11 @@ export interface SectionCost {
   requests: RequestCounts;
   /** Claims its write is expected to make, each verified by a verdict of its own. */
   claims: number;
+  /**
+   * Why it costs nothing, when it doesn't: its requests are cached, or it has
+   * no Evidence and so is written without the LLM.
+   */
+  free?: "cached" | "no-evidence";
 }
 
 export function totalCost(sections: SectionCost[]): CostEstimate {

@@ -108,7 +108,7 @@ describe("scribe generate's cost estimate", () => {
 
     const { status, stdout } = scribeWithInput(repo.dir, "n\n", "generate");
 
-    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 4 Sections, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\n  modules\/src-b  \$\d+\.\d+\n  overview       \$\d+\.\d+\n  architecture   \$\d+\.\d+\n  plus 3 cached Sections at no cost\nAn estimate, made before calling Claude: about [\d,]+ requests \([\d,]+ Section writes and repairs, [\d,]+ verdicts\) for about [\d,]+ expected Claims\. The run can spend more or less\.\nContinue\? \[y\/N\] /);
+    expect(stdout).toMatch(/^Estimated cost: \$\d+\.\d+ for 4 Sections, about [\d,]+ tokens\n  modules\/src-a  \$\d+\.\d+\n  modules\/src-b  \$\d+\.\d+\n  overview       \$\d+\.\d+\n  architecture   \$\d+\.\d+\n  plus 3 Sections with no Evidence, written without Claude: getting-started, conventions, key-decisions\nAn estimate, made before calling Claude: about [\d,]+ requests \([\d,]+ Section writes and repairs, [\d,]+ verdicts\) for about [\d,]+ expected Claims\. The run can spend more or less\.\nContinue\? \[y\/N\] /);
     expect(stdout).toMatch(/Cancelled; no LLM was called and nothing was written\.\n$/);
     expect(status).toBe(1);
     expect(repo.git("status", "--porcelain", "--untracked-files=all", "--ignored")).toBe("");
