@@ -16,13 +16,16 @@ const USAGE = "Usage: scribe <command> [--yes]\n\nCommands:\n  init      Detect 
 /**
  * Prints a run's warnings to stderr, each once however often it is called:
  * the run's warnings so far, ahead of its estimate, then all of them once it
- * ends, of which only those raised since are new. A run only ever adds warnings.
+ * ends, of which only those not printed yet are.
  */
 function warningPrinter(): (warnings: string[]) => void {
-  let printed = 0;
+  const printed = new Set<string>();
   return (warnings) => {
-    for (const warning of warnings.slice(printed)) console.error(`warning: ${warning}`);
-    printed = Math.max(printed, warnings.length);
+    for (const warning of warnings) {
+      if (printed.has(warning)) continue;
+      printed.add(warning);
+      console.error(`warning: ${warning}`);
+    }
   };
 }
 
@@ -91,7 +94,7 @@ function hasKey(): boolean {
 export interface Cli {
   dir: string;
   /** Built once a command that calls them has passed its checks. */
-  adapters(): Adapters;
+  adapters(dir: string): Adapters;
   /** Shows `question` and resolves to the answer, or undefined if none comes, as when stdin closes. */
   ask(question: string): Promise<string | undefined>;
 }
@@ -126,7 +129,7 @@ export async function main(argv: string[], { dir, adapters, ask }: Cli): Promise
     }
     case "generate": {
       const warn = warningPrinter();
-      const { declined, droppedClaims, frozen, reduced, warnings, drift } = await generate(dir, { confirm: confirmer(yes, ask, warn) }, adapters());
+      const { declined, droppedClaims, frozen, reduced, warnings, drift } = await generate(dir, { confirm: confirmer(yes, ask, warn) }, adapters(dir));
       warn(warnings);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
       if (declined) return cancelled();
@@ -138,7 +141,7 @@ export async function main(argv: string[], { dir, adapters, ask }: Cli): Promise
     }
     case "update": {
       const warn = warningPrinter();
-      const { declined, droppedClaims, frozen, proposals, reduced, removed, warnings, drift } = await update(dir, { confirm: confirmer(yes, ask, warn) }, adapters());
+      const { declined, droppedClaims, frozen, proposals, reduced, removed, warnings, drift } = await update(dir, { confirm: confirmer(yes, ask, warn) }, adapters(dir));
       warn(warnings);
       for (const section of frozen) console.log(`Frozen, left as is: ${section}`);
       if (declined) return cancelled();
@@ -174,7 +177,7 @@ export async function main(argv: string[], { dir, adapters, ask }: Cli): Promise
     }
     case "adopt": {
       const warn = warningPrinter();
-      const { declined, unsupportedClaims, clearedProposal, warnings } = await adopt(dir, section!, { confirm: confirmer(yes, ask, warn) }, adapters());
+      const { declined, unsupportedClaims, clearedProposal, warnings } = await adopt(dir, section!, { confirm: confirmer(yes, ask, warn) }, adapters(dir));
       warn(warnings);
       if (declined) return cancelled();
       for (const { text } of unsupportedClaims) console.log(`Unsupported Claim, kept: ${text}`);
@@ -184,7 +187,7 @@ export async function main(argv: string[], { dir, adapters, ask }: Cli): Promise
     }
     case "reset": {
       const warn = warningPrinter();
-      const { declined, droppedClaims, warnings, clearedProposal } = await reset(dir, section!, { confirm: confirmer(yes, ask, warn) }, adapters());
+      const { declined, droppedClaims, warnings, clearedProposal } = await reset(dir, section!, { confirm: confirmer(yes, ask, warn) }, adapters(dir));
       warn(warnings);
       if (declined) return cancelled();
       for (const { text, reason } of droppedClaims) console.log(`Dropped from ${section}: ${text} (${reason})`);

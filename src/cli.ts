@@ -6,8 +6,8 @@ import { claudeLlm } from "./llm.ts";
 import { main } from "./main.ts";
 
 /** Claude, and GitHub when `origin` is on it and `gh` is signed in; otherwise a warning says why it's off. */
-function adapters(): Adapters {
-  const { github, off } = connectGitHub(process.cwd());
+function adapters(dir: string): Adapters {
+  const { github, off } = connectGitHub(dir);
   if (off) console.error(`warning: ${whyGitHubIsOff(off)}`);
   return { llm: claudeLlm(), ...(github ? { github } : {}) };
 }
