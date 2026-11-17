@@ -39,13 +39,13 @@ function confirmer(yes: boolean, ask: Cli["ask"], warn: (warnings: string[]) => 
     warn(warnings);
     const paid = sections.filter((s) => s.tokens > 0);
     const width = Math.max(0, ...paid.map((s) => s.section.length));
-    console.log(`Estimated cost: ${usd(dollars)} for ${paid.length} Section${paid.length === 1 ? "" : "s"}, about ${tokens.toLocaleString("en-US")} tokens`);
+    console.log(`Estimated cost: ${usd(dollars)} for ${paid.length} ${sectionNoun(paid.length)}, about ${tokens.toLocaleString("en-US")} tokens`);
     for (const s of paid) console.log(`  ${s.section.padEnd(width)}  ${usd(s.dollars)}`);
+    const cached = sections.filter((s) => s.free === "cached").length;
+    if (cached > 0) console.log(`  plus ${cached} cached ${sectionNoun(cached)} at no cost`);
     const noEvidence = sections.filter((s) => s.free === "no-evidence").map((s) => s.section);
-    const cached = sections.length - paid.length - noEvidence.length;
-    if (cached > 0) console.log(`  plus ${cached} cached Section${cached === 1 ? "" : "s"} at no cost`);
     if (noEvidence.length > 0) {
-      console.log(`  plus ${noEvidence.length} Section${noEvidence.length === 1 ? "" : "s"} with no Evidence, written without Claude: ${noEvidence.join(", ")}`);
+      console.log(`  plus ${noEvidence.length} ${sectionNoun(noEvidence.length)} with no Evidence, written without Claude: ${noEvidence.join(", ")}`);
     }
     if (unpriced.length > 0) console.log(`  not counting ${unpriced.join(", ")}, whose price Scribe doesn't know`);
     const kinds = (Object.keys(REQUEST_NAMES) as (keyof RequestCounts)[])
@@ -67,6 +67,11 @@ const REQUEST_NAMES: Record<keyof RequestCounts, string> = {
   drift: "Drift searches",
   attach: "Evidence searches",
 };
+
+/** "Section" or "Sections", as `n` of them call for. */
+function sectionNoun(n: number): string {
+  return n === 1 ? "Section" : "Sections";
+}
 
 function count(n: number): string {
   return n.toLocaleString("en-US");
