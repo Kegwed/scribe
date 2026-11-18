@@ -10,6 +10,20 @@ export interface Module {
   path: string;
 }
 
+/**
+ * A Module path as Claude reads it, in Evidence text and prompts. On hono the
+ * verifier read a bare "." as relative to the adapter path beside it (#34),
+ * so the root is named.
+ */
+export function renderedPath(path: string): string {
+  return path === "." ? "the repo root" : path;
+}
+
+/** The first line of a prompt about one Module. */
+export function moduleHeader(module: Module): string {
+  return `Module: ${module.name} (${renderedPath(module.path)})`;
+}
+
 const CODE_FILE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 /** Tests, examples, fixtures and tooling: Evidence, never Modules. */
 const NON_PRODUCT_DIRS = new Set([

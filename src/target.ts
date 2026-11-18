@@ -12,7 +12,7 @@ import { type FetchedDiscussions, type GitHub, gitHubEvidence, isGitHubEvidence 
 import { contentHash } from "./hash.ts";
 import { KEY_DECISIONS } from "./key-decisions.ts";
 import { loadManifest, type Manifest, type SectionRecord } from "./manifest.ts";
-import { detectModules, type Module } from "./modules.ts";
+import { detectModules, type Module, renderedPath } from "./modules.ts";
 
 export const OVERVIEW = "overview";
 export const ARCHITECTURE = "architecture";
@@ -182,13 +182,13 @@ async function repoEvidenceOf(repoDir: string, modules: Module[], imports: Modul
       kind: "repo",
       id: "graph:modules",
       label: "Modules of the repo",
-      text: modules.map((m) => `${m.name} (${m.path})`).join("\n"),
+      text: modules.map((m) => `${m.name} (${renderedPath(m.path)})`).join("\n"),
     },
     {
       kind: "repo",
       id: "graph:imports",
       label: "Import graph between Modules",
-      text: imports.length > 0 ? imports.map(({ from, to }) => `${from} imports ${to}`).join("\n") : "No Module imports another.",
+      text: imports.length > 0 ? imports.map(({ from, to }) => `${renderedPath(from)} imports ${renderedPath(to)}`).join("\n") : "No Module imports another.",
     },
   ];
   const packageJson = join(repoDir, "package.json");
