@@ -7,7 +7,7 @@ import { modelsOf } from "./config.ts";
 import { CONVENTIONS, conventionsEvidence, hasConventions } from "./conventions.ts";
 import { docsAbout, isDoc } from "./docs.ts";
 import { DRIFT_SCHEMA, DRIFT_SYSTEM, driftPrompt, parseDrift, VERIFY_DRIFT_SYSTEM } from "./drift.ts";
-import { attachRequest as attachCost, driftSearch, expectedProseChars, type ExpectedRequests, expectedVerification, expectedWrite, sectionCost, type SectionCost, summaryRequest, uncitedVerdict, unwrittenVerdict, verdicts } from "./estimate.ts";
+import { attachRequest as attachCost, driftSearch, expectedProseChars, type ExpectedRequests, expectedWrite, sectionCost, type SectionCost, summaryRequest, uncitedVerdict, unwrittenVerdict, verdicts } from "./estimate.ts";
 import { type Evidence, inFile, isRepoEvidence } from "./evidence.ts";
 import { ASSUMED_SUMMARY, finishFit, type FitPlan, type FittedPrompt, keepCodeRank, parseSummary, planFit, summaryRequests, wholeFit } from "./fit.ts";
 import { GETTING_STARTED, unmatchedCommands } from "./getting-started.ts";
@@ -517,9 +517,8 @@ export function sectionWriter(
       if (!written) return sectionCost(section, expected, 0);
 
       const revises = existing !== undefined && manifest.sections[section] !== undefined;
-      const verification = expectedVerification(fitted.sent, revises ? changedEvidence : undefined);
       const verdict = unwrittenVerdict(verdictFor(models.verify, { text: "", evidence: [] }, [], about), fitted.sent.map(about.render));
-      const { claims, requests } = expectedWrite(request, verification, verdict);
+      const { claims, requests } = expectedWrite(request, revises && changedEvidence !== undefined, verdict);
       return sectionCost(section, [...expected, ...requests], claims);
     },
 

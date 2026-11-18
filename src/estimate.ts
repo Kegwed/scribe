@@ -1,4 +1,3 @@
-import type { Evidence } from "./evidence.ts";
 import { estimateCost, inputTokens, type LlmRequest, OUTPUT_LIMITS, priceTokens, type RequestCost } from "./llm.ts";
 import { BOTTOM_UP } from "./prompts.ts";
 
@@ -158,42 +157,25 @@ export function verdicts(requests: LlmRequest[]): ExpectedRequests[] {
   return requests.map((request) => oneRequest("verdict", verdictCost(request)));
 }
 
-/** The share of a Section's Claims a write is expected to verify anew, and the share of those expected to fail. */
-export interface Verification {
-  share: number;
-  failureRate: number;
-}
-
-/**
- * How a write is expected to be verified: all its Claims at the first write's
- * rate, unless it is a revision given `changedEvidence`, whose Claims citing
- * only unchanged Evidence keep their cached verdicts, and whose new Claims
- * fail more rarely.
- */
-export function expectedVerification(sent: Evidence[], changedEvidence: string[] | undefined): Verification {
-  if (!changedEvidence) return { share: 1, failureRate: CLAIM_FAILURE_RATE };
-  const changed = new Set(changedEvidence);
-  return { share: sent.filter((e) => changed.has(e.id)).length / Math.max(sent.length, 1), failureRate: REVISION_FAILURE_RATE };
-}
-
 /**
  * A Section's write from `request` and the Claims it is expected to make: the
  * first write, the Section's one repair, sent when any Claim fails, and their
- * verdicts at `verdict` each.
+ * verdicts at `verdict` each. Every Claim is verified anew, even a revision's:
+ * rewritten, its Claims miss the verdicts cached for the Section before. A
+ * revision's Claims fail more rarely than a first write's.
  */
 export function expectedWrite(
   request: LlmRequest,
-  { share, failureRate }: Verification,
+  revises: boolean,
   verdict: RequestCost,
 ): { claims: number; requests: ExpectedRequests[] } {
   const input = inputTokens(request);
   const claims = expectedClaims(input);
   const output = claims * OUTPUT_TOKENS_PER_CLAIM;
-  // A revision keeps the Claims its changed Evidence doesn't touch, whose verdicts are cached; only the rest are verified anew.
-  const verified = claims * share;
-  const failing = verified * failureRate;
+  const failureRate = revises ? REVISION_FAILURE_RATE : CLAIM_FAILURE_RATE;
+  const failing = claims * failureRate;
   // The repair's prompt carries the first prompt, the first answer and why each Claim failed.
-  const repairChance = 1 - (1 - failureRate) ** verified;
+  const repairChance = 1 - (1 - failureRate) ** claims;
   const repairInput = input + output + (repairChance > 0 ? (failing / repairChance) * FAILURE_TOKENS : 0);
   return {
     claims,
@@ -201,7 +183,7 @@ export function expectedWrite(
       oneRequest("write", priceTokens(request.model, input, output)),
       { kind: "write", count: repairChance, cost: priceTokens(request.model, repairInput, output) },
       // The first verification's verdicts, then those of the Claims the repair rewrote.
-      { kind: "verdict", count: verified + failing, cost: verdict },
+      { kind: "verdict", count: claims + failing, cost: verdict },
     ],
   };
 }
@@ -243,6 +225,8 @@ function citedChars(evidence: string[]): number {
  * Each size and rate below is marked measured or assumed. "On hono" means the
  * #28 measurement: a `generate` of honojs/hono (9 Modules, 14 Sections, 687
  * requests) and the `update` after it, with Claude's usage logged per request.
+ * "Hono's #31 `update`" means the re-measurement of that `update`, from
+ * 61f7c59e to f6fbaf02, which rewrote 3 Sections in 120 requests.
  */
 
 /**
@@ -261,10 +245,12 @@ const SECTION_CHARS_PER_CLAIM = 180;
 /** The share of Claims a first verification fails, each failure calling for the Section's one repair. Measured: 76 of 259 on hono. */
 const CLAIM_FAILURE_RATE = 0.3;
 /**
- * The share of a revision's newly verified Claims that fail. Assumed: hono's
- * `update` failed none of 31, too few to measure a rate from.
+ * The share of a revision's Claims a first verification fails. Measured on
+ * hono's #31 `update`: its 3 revisions sent about 105 verdicts for about 91
+ * expected Claims, so about 14 Claims failed and were verified again after
+ * their repair, and each revision was repaired.
  */
-const REVISION_FAILURE_RATE = 0.05;
+const REVISION_FAILURE_RATE = 0.15;
 /** Tokens a repair prompt adds per failed Claim, for its text and the verifier's reason. Assumed; not measured. */
 const FAILURE_TOKENS = 150;
 /** Output tokens of one verdict. Measured: about 450 on hono. */

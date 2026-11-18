@@ -109,7 +109,7 @@ describe("update's cost estimate", () => {
     expect(repo.git("status", "--porcelain", "--untracked-files=all")).toBe("");
   });
 
-  it("expects a revision to verify anew only the Claims its changed Evidence touches, and a Proposal all of its Claims", async () => {
+  it("expects a revision, like a Proposal, to verify all its Claims anew and to be repaired", async () => {
     const repo = await generated();
     repo.commit({ "src/a/a.ts": A_CHANGED });
     const estimateOf = async () => {
@@ -122,10 +122,11 @@ describe("update's cost estimate", () => {
     repo.commit({ [A]: "# A\n\nMy words.\n" });
     const proposal = await estimateOf();
 
-    // One of A's two symbols changed, so about half its Claims are verified anew; a Proposal is written afresh.
-    expect(revision.requests.verdict).toBeGreaterThan(0);
-    expect(revision.requests.verdict).toBeLessThan(revision.claims);
-    expect(proposal.requests.verdict).toBeGreaterThanOrEqual(proposal.claims);
+    // Only one of A's two symbols changed, yet a rewritten Section's Claims miss their cached verdicts, and some fail and are repaired.
+    for (const write of [revision, proposal]) {
+      expect(write.requests.verdict).toBeGreaterThan(write.claims);
+      expect(write.requests.write).toBeGreaterThan(1.5);
+    }
   });
 
   it("counts a Proposal for a Frozen, Stale Section, and declining writes none", async () => {
