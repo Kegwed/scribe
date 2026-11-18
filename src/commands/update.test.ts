@@ -125,8 +125,11 @@ describe("update's cost estimate", () => {
     // Only one of A's two symbols changed, yet a rewritten Section's Claims miss their cached verdicts, and some fail and are repaired.
     for (const write of [revision, proposal]) {
       expect(write.requests.verdict).toBeGreaterThan(write.claims);
+      // The first write, and a repair expected more often than not.
       expect(write.requests.write).toBeGreaterThan(1.5);
     }
+    // A revision's Claims fail more rarely than a Proposal's, written afresh, so fewer are verified again after repair.
+    expect(revision.requests.verdict! / revision.claims).toBeLessThan(proposal.requests.verdict! / proposal.claims);
   });
 
   it("counts a Proposal for a Frozen, Stale Section, and declining writes none", async () => {

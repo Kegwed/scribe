@@ -516,9 +516,10 @@ export function sectionWriter(
       ];
       if (!written) return sectionCost(section, expected, 0);
 
-      const revises = existing !== undefined && manifest.sections[section] !== undefined;
+      // Revised from its current text, as `planFirstWrite` builds it, or else written as if for the first time.
+      const revision = changedEvidence !== undefined && existing !== undefined && manifest.sections[section] !== undefined;
       const verdict = unwrittenVerdict(verdictFor(models.verify, { text: "", evidence: [] }, [], about), fitted.sent.map(about.render));
-      const { claims, requests } = expectedWrite(request, revises && changedEvidence !== undefined, verdict);
+      const { claims, requests } = expectedWrite(request, revision, verdict);
       return sectionCost(section, [...expected, ...requests], claims);
     },
 

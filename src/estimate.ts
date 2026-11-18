@@ -245,10 +245,13 @@ const SECTION_CHARS_PER_CLAIM = 180;
 /** The share of Claims a first verification fails, each failure calling for the Section's one repair. Measured: 76 of 259 on hono. */
 const CLAIM_FAILURE_RATE = 0.3;
 /**
- * The share of a revision's Claims a first verification fails. Measured on
- * hono's #31 `update`: its 3 revisions sent about 105 verdicts for about 91
- * expected Claims, so about 14 Claims failed and were verified again after
- * their repair, and each revision was repaired.
+ * The share of a revision's Claims a first verification fails. Derived from
+ * hono's #31 `update`: its 3 revisions sent about 105 verdicts, measured
+ * (counted from the order and size of its requests), for about 91 Claims, as
+ * `expectedClaims` expects rather than counted; so about 14 Claims failed and
+ * were verified again after their repair. Each revision was repaired, also
+ * measured. Not split per Section: the Claims curve fits these 3 Sections only
+ * in aggregate.
  */
 const REVISION_FAILURE_RATE = 0.15;
 /** Tokens a repair prompt adds per failed Claim, for its text and the verifier's reason. Assumed; not measured. */

@@ -59,14 +59,17 @@ export function priceTokens(model: string, input: number, output: number): Reque
 }
 
 /**
- * A rough token count. Claude's tokenizer counted about 2.4 characters a token
- * on the code and prose of Scribe's prompts for honojs/hono, far fewer than
- * the four often assumed for English. `extraChars` counts text not in hand.
+ * A rough token count, at `CHARS_PER_TOKEN`. `extraChars` counts text not in hand.
  */
 export function approximateTokens(text: string, extraChars = 0): number {
   return Math.ceil((text.length + extraChars) / CHARS_PER_TOKEN);
 }
 
+/**
+ * Characters of a prompt per token. Measured: Claude's tokenizer counted about
+ * 2.4 on the code and prose of Scribe's prompts for honojs/hono, far fewer
+ * than the four often assumed for English.
+ */
 const CHARS_PER_TOKEN = 2.4;
 
 export interface LlmRequest {
@@ -120,10 +123,10 @@ export interface ClaudeAnswer {
 export const OUTPUT_LIMITS: Readonly<Record<LlmRequest["kind"], number>> = {
   /**
    * Measured: at most 933 tokens in the 610 responses sent before any write,
-   * all summaries, but for the one runaway; the estimate assumes 200.
+   * all summaries, but for the one runaway; the estimate expects the 200 measured on average.
    */
   summary: 4_000,
-  /** Measured: at most 1,372 tokens in any Haiku response but a Drift search; the estimate assumes 450. */
+  /** Measured: at most 1,372 tokens in any Haiku response but a Drift search; the estimate expects the 450 measured on average. */
   verdict: 4_000,
   /** Measured: at most 9,125 tokens, for a Module of about 173,000 prompt tokens; the estimate assumes 500. */
   drift: 32_000,
