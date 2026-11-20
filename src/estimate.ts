@@ -225,8 +225,8 @@ function citedChars(evidence: string[]): number {
  * Each size and rate below is marked measured or assumed. "On hono" means the
  * #28 measurement: a `generate` of honojs/hono (9 Modules, 14 Sections, 687
  * requests) and the `update` after it, with Claude's usage logged per request.
- * "Hono's #31 `update`" means the re-measurement of that `update`, from
- * 61f7c59e to f6fbaf02, which rewrote 3 Sections in 120 requests.
+ * "Hono's #37 `update`" means a later measurement of that `update`, from
+ * 61f7c59e to f6fbaf02, which rewrote 3 Sections in 130 requests.
  */
 
 /**
@@ -245,13 +245,12 @@ const SECTION_CHARS_PER_CLAIM = 180;
 /** The share of Claims a first verification fails, each failure calling for the Section's one repair. Measured: 76 of 259 on hono. */
 const CLAIM_FAILURE_RATE = 0.3;
 /**
- * The share of a revision's Claims a first verification fails. Derived from
- * hono's #31 `update`: its 3 revisions sent about 105 verdicts, measured
- * (counted from the order and size of its requests), for about 91 Claims, as
- * `expectedClaims` expects rather than counted; so about 14 Claims failed and
- * were verified again after their repair. Each revision was repaired, also
- * measured. Not split per Section: the Claims curve fits these 3 Sections only
- * in aggregate.
+ * The share of a revision's Claims a first verification fails. Measured on
+ * hono's #37 `update` (logged by kind with `scripts/measure.mjs`): its 3
+ * revisions sent 103 verdicts on their first writes and 13 on the Claims their
+ * repairs rewrote, about 13%, and 2 of the 3 were repaired. #31's run of the
+ * same `update`, its kinds inferred from request order, came to about 15%,
+ * the rate #37's estimate ran with, within 1% of what it spent.
  */
 const REVISION_FAILURE_RATE = 0.15;
 /** Tokens a repair prompt adds per failed Claim, for its text and the verifier's reason. Assumed; not measured. */
