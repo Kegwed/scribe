@@ -41,6 +41,7 @@
     "check": "npm run typecheck && npm run build && node scripts/check-recordings.mjs",
     "record": "node scripts/record-cassettes.mjs",
     "eval": "node scripts/eval.mjs",
+    "measure": "node scripts/measure.mjs",
     "prepare": "git config core.hooksPath .githooks",
     "prepack": "npm run build",
     "smoke:pack": "node scripts/smoke-pack.mjs"

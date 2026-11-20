@@ -1,9 +1,10 @@
-// Preload that records what each Claude Messages response actually used, one JSON line per response,
-// to the file named by USAGE_LOG. Scribe's CLI reports only estimates; this is how a live run's real
-// spend is measured. Total it with scripts/spend.mjs.
+// Preload that records what each Claude Messages response actually used, and the kind of request it
+// answered, one JSON line per response, to the file named by USAGE_LOG. Scribe's CLI reports only
+// estimates; this is how a live run's real spend is measured. Total it with scripts/spend.mjs.
 //
 //   USAGE_LOG=run.log node --import ./scripts/usage-log.mjs dist/cli.js generate
 import { appendFileSync } from "node:fs";
+import { classify } from "./usage.mjs";
 
 const log = process.env.USAGE_LOG;
 const original = globalThis.fetch;
@@ -12,13 +13,14 @@ globalThis.fetch = async (input, init) => {
   const response = await original(input, init);
   const url = typeof input === "string" ? input : (input.url ?? String(input));
   if (!log || !url.includes("/v1/messages")) return response;
-  record(response.clone()).catch((error) => appendFileSync(log, JSON.stringify({ logError: String(error) }) + "\n"));
+  const request = typeof init?.body === "string" ? classify(init.body) : { kind: "unknown" };
+  record(response.clone(), request).catch((error) => appendFileSync(log, JSON.stringify({ logError: String(error) }) + "\n"));
   return response;
 };
 
-async function record(response) {
+async function record(response, request) {
   const text = await response.text();
-  const usage = { status: response.status, model: undefined, input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+  const usage = { status: response.status, ...request, model: undefined, input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
   // Scribe streams, so usage arrives in server-sent events: message_start carries the input side,
   // message_delta the final counts.
   for (const line of text.split("\n")) {
